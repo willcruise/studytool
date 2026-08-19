@@ -1,9 +1,12 @@
 use std::fs;
-use std::path::PathBuf;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::Manager;
 use tauri_plugin_sql::{Migration, MigrationKind};
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 fn attachments_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
@@ -60,6 +63,95 @@ fn save_bytes(app: tauri::AppHandle, filename: String, bytes: Vec<u8>) -> Result
     let dest = attachments_dir(&app)?.join(unique_name(&filename));
     fs::write(&dest, bytes).map_err(|e| e.to_string())?;
     Ok(dest.to_string_lossy().to_string())
+}
+
+fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path().app_data_dir().map_err(|e| e.to_string())
+}
+
+fn add_zip_file(zip: &mut ZipWriter<fs::File>, path: &Path, name: &str) -> Result<(), String> {
+    if !path.is_file() {
+        return Ok(());
+    }
+    let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    zip.start_file(name, opts).map_err(|e| e.to_string())?;
+    let bytes = fs::read(path).map_err(|e| e.to_string())?;
+    zip.write_all(&bytes).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Packs the SQLite DB and attachment files into a zip at dest_path.
+#[tauri::command]
+fn export_backup(app: tauri::AppHandle, dest_path: String) -> Result<(), String> {
+    let dir = data_dir(&app)?;
+    let file = fs::File::create(&dest_path).map_err(|e| e.to_string())?;
+    let mut zip = ZipWriter::new(file);
+    for name in ["studymap.db", "studymap.db-wal", "studymap.db-shm"] {
+        add_zip_file(&mut zip, &dir.join(name), name)?;
+    }
+    let att = dir.join("attachments");
+    if att.is_dir() {
+        for entry in fs::read_dir(&att).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_file() {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                add_zip_file(&mut zip, &path, &format!("attachments/{fname}"))?;
+            }
+        }
+    }
+    zip.finish().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn safe_zip_path(name: &str) -> Option<PathBuf> {
+    if Path::new(name).is_absolute() || name.contains("..") {
+        return None;
+    }
+    if name == "studymap.db" || name == "studymap.db-wal" || name == "studymap.db-shm" {
+        return Some(PathBuf::from(name));
+    }
+    if let Ok(rest) = Path::new(name).strip_prefix("attachments") {
+        if rest.as_os_str().is_empty() {
+            return None;
+        }
+        return Some(PathBuf::from("attachments").join(rest));
+    }
+    None
+}
+
+/// Restores DB + attachments from a zip. Caller should reload the app afterwards.
+#[tauri::command]
+fn import_backup(app: tauri::AppHandle, src_path: String) -> Result<(), String> {
+    let dir = data_dir(&app)?;
+    fs::create_dir_all(dir.join("attachments")).map_err(|e| e.to_string())?;
+    let file = fs::File::open(&src_path).map_err(|e| e.to_string())?;
+    let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
+    let mut saw_db = false;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        if entry.is_dir() {
+            continue;
+        }
+        let Some(rel) = safe_zip_path(entry.name()) else {
+            continue;
+        };
+        if rel.file_name().and_then(|n| n.to_str()) == Some("studymap.db") {
+            saw_db = true;
+        }
+        let dest = dir.join(&rel);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut out = fs::File::create(&dest).map_err(|e| e.to_string())?;
+        let mut buf = Vec::new();
+        entry.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+        out.write_all(&buf).map_err(|e| e.to_string())?;
+    }
+    if !saw_db {
+        return Err("백업에 studymap.db가 없습니다".into());
+    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -146,11 +238,24 @@ pub fn run() {
             sql: "ALTER TABLE debts ADD COLUMN check_content TEXT NOT NULL DEFAULT '';",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 6,
+            description: "cache rename, parent split, source file, spaced review",
+            sql: r#"
+            UPDATE debts SET tier = 'cache' WHERE tier = 'l1';
+            ALTER TABLE debts ADD COLUMN parent_id INTEGER;
+            ALTER TABLE debts ADD COLUMN source_file TEXT;
+            ALTER TABLE debts ADD COLUMN next_review_at TEXT;
+            ALTER TABLE debts ADD COLUMN review_stage INTEGER NOT NULL DEFAULT 0;
+            "#,
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:studymap.db", migrations)
@@ -179,7 +284,12 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![import_file, save_bytes])
+        .invoke_handler(tauri::generate_handler![
+            import_file,
+            save_bytes,
+            export_backup,
+            import_backup
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

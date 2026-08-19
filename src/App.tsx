@@ -2,58 +2,32 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import {
-  isPermissionGranted,
-  requestPermission,
-  sendNotification,
-} from "@tauri-apps/plugin-notification";
-import type { Debt, Session, Tier } from "./types";
+import type { Debt, GraphEdge, Session, Stats, Tier, View } from "./types";
+import { VIEWS, visibleBoardTiers } from "./types";
 import * as db from "./db";
-import { checkExcerpt, checkIsReady, htmlToText } from "./richtext";
-import { getImageSink, ingestImageFile, ingestImagePath, isImagePath } from "./images";
-import { importFile } from "./files";
+import { checkExcerpt, checkIsReady, matchesQuery } from "./richtext";
+import { getImageSink } from "./images";
+import { exportBackup, importBackup } from "./backup";
+import { ingestDroppedPaths, ingestPastedImage, pasteTargetIsEditor } from "./ingest";
+import { notify } from "./notify";
+import { minutesBetween, parseUtc } from "./time";
 import { CaptureBar } from "./components/CaptureBar";
 import { SessionPicker } from "./components/SessionPicker";
 import { Board } from "./components/Board";
 import { DetailPanel } from "./components/DetailPanel";
-import { DigBar, DigEndModal, parseUtc } from "./components/Dig";
+import { DigBar, DigEndModal } from "./components/Dig";
 import { GraphView } from "./components/GraphView";
 import { ReviewPanel } from "./components/ReviewPanel";
+import { ArchivePanel } from "./components/ArchivePanel";
+import { ConfirmButton } from "./components/ConfirmButton";
+import { MoreMenu } from "./components/MoreMenu";
 import "./App.css";
-
-async function notify(title: string, body: string) {
-  try {
-    let granted = await isPermissionGranted();
-    if (!granted) {
-      granted = (await requestPermission()) === "granted";
-    }
-    if (granted) sendNotification({ title, body });
-  } catch {
-    /* notifications are best-effort */
-  }
-}
-
-type View = "board" | "graph" | "review" | "resolved";
-
-function matchesQuery(d: Debt, q: string): boolean {
-  if (!q) return true;
-  const hay = [
-    d.title,
-    htmlToText(d.note),
-    htmlToText(d.check_content),
-    d.summary ?? "",
-    d.session_topic ?? "",
-  ]
-    .join("\n")
-    .toLowerCase();
-  return hay.includes(q);
-}
 
 export default function App() {
   const [allDebts, setAllDebts] = useState<Debt[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
-  const [stats, setStats] = useState<db.Stats>({ open: 0, resolved: 0 });
+  const [stats, setStats] = useState<Stats>({ open: 0, resolved: 0 });
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [view, setView] = useState<View>("board");
   const [query, setQuery] = useState("");
@@ -65,34 +39,51 @@ export default function App() {
   const [digFinishRequested, setDigFinishRequested] = useState(false);
   const [forceWriter, setForceWriter] = useState<null | "check">(null);
   const [pauseDigModal, setPauseDigModal] = useState(false);
+  const [sessionOnly, setSessionOnly] = useState(true);
+  const [showRam, setShowRam] = useState(false);
+  const [showStorage, setShowStorage] = useState(false);
+  const [captureTier, setCaptureTier] = useState<Tier>("inbox");
+  const [graphEdges, setGraphEdges] = useState<GraphEdge[]>([]);
   const digNotifiedRef = useRef(false);
+  const toastTimer = useRef<number | null>(null);
 
   const selectedIdRef = useRef<number | null>(null);
   const activeSessionRef = useRef<Session | null>(null);
+  const allDebtsRef = useRef<Debt[]>([]);
   selectedIdRef.current = selectedId;
   activeSessionRef.current = activeSession;
+  allDebtsRef.current = allDebts;
 
   const showToast = (msg: string) => {
     setToast(msg);
-    window.setTimeout(() => setToast(null), 2500);
+    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 2500);
   };
 
   const refresh = useCallback(async () => {
-    const [d, s, active, st] = await Promise.all([
+    const [d, s, active, st, edges] = await Promise.all([
       db.listAllDebts(),
       db.listSessions(),
       db.getActiveSession(),
       db.getStats(),
+      db.listAllGraphEdges(),
     ]);
     setAllDebts(d);
     setSessions(s);
     setActiveSession(active);
     setStats(st);
+    setGraphEdges(edges);
   }, []);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
+    };
+  }, []);
 
   const openDebts = useMemo(() => allDebts.filter((d) => d.status === "open"), [allDebts]);
   const resolvedDebts = useMemo(
@@ -103,17 +94,34 @@ export default function App() {
     () => allDebts.filter((d) => d.status === "evicted"),
     [allDebts]
   );
+  const sessionOpen = useMemo(() => {
+    if (sessionOnly && activeSession) {
+      return openDebts.filter((d) => d.session_id === activeSession.id);
+    }
+    return openDebts;
+  }, [openDebts, sessionOnly, activeSession]);
   const visibleOpen = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return openDebts;
-    return openDebts.filter((d) => matchesQuery(d, q));
-  }, [openDebts, query]);
-  const archiveItems = (archiveFilter === "resolved" ? resolvedDebts : evictedDebts).filter(
-    (d) => {
-      const q = query.trim().toLowerCase();
-      return matchesQuery(d, q);
-    }
+    if (!q) return sessionOpen;
+    return sessionOpen.filter((d) => matchesQuery(d, q));
+  }, [sessionOpen, query]);
+  const visibleTiers = useMemo(
+    () => visibleBoardTiers(showRam, showStorage),
+    [showRam, showStorage]
   );
+  const dueChecks = useMemo(
+    () =>
+      resolvedDebts.filter(
+        (d) => d.next_review_at !== null && parseUtc(d.next_review_at) <= Date.now()
+      ),
+    [resolvedDebts]
+  );
+  const archiveItems = useMemo(() => {
+    const source = archiveFilter === "resolved" ? resolvedDebts : evictedDebts;
+    const q = query.trim().toLowerCase();
+    return source.filter((d) => matchesQuery(d, q));
+  }, [archiveFilter, resolvedDebts, evictedDebts, query]);
+
   useEffect(() => {
     const unlisten = listen("debt-added", () => refresh());
     return () => {
@@ -167,7 +175,7 @@ export default function App() {
       activeDig?.id === id
         ? digMinutesSpent
         : current.dig_started_at
-          ? Math.max(0, Math.round((Date.now() - parseUtc(current.dig_started_at)) / 60000))
+          ? minutesBetween(current.dig_started_at)
           : 0;
     await db.endDig(id, spent);
     setAllDebts((prev) =>
@@ -207,6 +215,30 @@ export default function App() {
 
   // ---------- capture ----------
 
+  const selectTier = (tier: Tier) => {
+    if (tier === "ram") {
+      if (showRam) {
+        setShowRam(false);
+        if (captureTier === "ram") setCaptureTier(showStorage ? "storage" : "inbox");
+      } else {
+        setShowRam(true);
+        setCaptureTier("ram");
+      }
+      return;
+    }
+    if (tier === "storage") {
+      if (showStorage) {
+        setShowStorage(false);
+        if (captureTier === "storage") setCaptureTier(showRam ? "ram" : "inbox");
+      } else {
+        setShowStorage(true);
+        setCaptureTier("storage");
+      }
+      return;
+    }
+    setCaptureTier(tier);
+  };
+
   const capture = async (title: string, tier: Tier, sourceUrl: string | null, note = "") => {
     const id = await db.createDebt({
       title,
@@ -219,6 +251,22 @@ export default function App() {
     return id;
   };
 
+  const ingestCtx = () => ({
+    selectedId: selectedIdRef.current,
+    sessionId: activeSessionRef.current?.id ?? null,
+    debts: allDebtsRef.current,
+  });
+
+  const applyIngest = async (result: {
+    toast: string;
+    refresh: boolean;
+    bumpAttachments: boolean;
+  }) => {
+    if (result.bumpAttachments) setAttachmentsVersion((v) => v + 1);
+    if (result.refresh) await refresh();
+    showToast(result.toast);
+  };
+
   // ---------- external file drop (Tauri drag-drop event) ----------
 
   useEffect(() => {
@@ -229,44 +277,8 @@ export default function App() {
         setDropActive(false);
       } else if (event.payload.type === "drop") {
         setDropActive(false);
-        const paths = event.payload.paths;
         try {
-          const targetId = selectedIdRef.current;
-          const sink = getImageSink();
-          let inserted = 0;
-          let attached = 0;
-          for (const p of paths) {
-            if (sink && targetId !== null && isImagePath(p)) {
-              const stored = await ingestImagePath(targetId, p);
-              if (stored) {
-                sink(stored);
-                inserted += 1;
-                continue;
-              }
-            }
-            const stored = await importFile(p);
-            const filename = p.split("/").pop() ?? "file";
-            if (targetId !== null) {
-              await db.addAttachment(targetId, filename, stored);
-            } else {
-              const id = await db.createDebt({
-                title: filename,
-                tier: "inbox",
-                sessionId: activeSessionRef.current?.id ?? null,
-              });
-              await db.addAttachment(id, filename, stored);
-            }
-            attached += 1;
-          }
-          setAttachmentsVersion((v) => v + 1);
-          if (attached > 0) await refresh();
-          showToast(
-            inserted > 0
-              ? `사진 ${inserted}장을 에디터에 추가했습니다`
-              : targetId !== null
-                ? `파일 ${attached}개를 선택된 항목에 첨부했습니다`
-                : `파일 ${paths.length}개를 인박스에 추가했습니다`
-          );
+          await applyIngest(await ingestDroppedPaths(event.payload.paths, ingestCtx()));
         } catch (e) {
           showToast(`파일 저장 실패: ${e}`);
         }
@@ -281,15 +293,7 @@ export default function App() {
 
   useEffect(() => {
     const onPaste = async (e: ClipboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable ||
-        target.closest?.("[contenteditable='true'], .rich-editor")
-      ) {
-        return;
-      }
+      if (pasteTargetIsEditor(e.target)) return;
 
       const items = e.clipboardData?.items ?? [];
       for (const item of items) {
@@ -297,29 +301,7 @@ export default function App() {
           e.preventDefault();
           const file = item.getAsFile();
           if (!file) continue;
-          const targetId = selectedIdRef.current;
-          const sink = getImageSink();
-          if (sink && targetId !== null) {
-            const stored = await ingestImageFile(targetId, file);
-            sink(stored);
-            setAttachmentsVersion((v) => v + 1);
-            showToast("사진을 에디터에 넣었습니다");
-            return;
-          }
-          if (targetId !== null) {
-            await ingestImageFile(targetId, file);
-            showToast("이미지를 선택된 항목에 첨부했습니다");
-          } else {
-            const id = await db.createDebt({
-              title: "붙여넣은 이미지",
-              tier: "inbox",
-              sessionId: activeSessionRef.current?.id ?? null,
-            });
-            await ingestImageFile(id, file);
-            showToast("이미지를 인박스에 추가했습니다");
-          }
-          setAttachmentsVersion((v) => v + 1);
-          await refresh();
+          await applyIngest(await ingestPastedImage(file, ingestCtx()));
           return;
         }
       }
@@ -339,13 +321,6 @@ export default function App() {
     await refresh();
     showToast("방출했습니다 — 진짜 중요하면 다시 마주치게 됩니다");
   };
-
-  const VIEWS: { key: View; label: string }[] = [
-    { key: "board", label: "보드" },
-    { key: "graph", label: "지도" },
-    { key: "review", label: "리뷰" },
-    { key: "resolved", label: "탐험 완료" },
-  ];
 
   return (
     <div className="app">
@@ -387,10 +362,46 @@ export default function App() {
                 className={view === v.key ? "active" : ""}
                 onClick={() => setView(v.key)}
               >
-                {v.label}
+                {v.key === "review" && dueChecks.length > 0
+                  ? `리뷰 ${dueChecks.length}`
+                  : v.label}
               </button>
             ))}
           </div>
+          <MoreMenu>
+            <button
+              type="button"
+              className="more-menu-item"
+              role="menuitem"
+              title="데이터베이스와 첨부를 zip으로 저장"
+              onClick={async () => {
+                try {
+                  if (await exportBackup()) showToast("백업을 저장했습니다");
+                } catch (e) {
+                  showToast(`백업 실패: ${e}`);
+                }
+              }}
+            >
+              백업
+            </button>
+            <ConfirmButton
+              label="복원"
+              confirmLabel="덮어쓸까요?"
+              className="more-menu-item"
+              title="백업 zip으로 현재 데이터를 덮어씁니다"
+              onConfirm={async () => {
+                try {
+                  const ok = await importBackup();
+                  if (ok) {
+                    showToast("복원했습니다. 다시 불러옵니다");
+                    window.setTimeout(() => window.location.reload(), 500);
+                  }
+                } catch (e) {
+                  showToast(`복원 실패: ${e}`);
+                }
+              }}
+            />
+          </MoreMenu>
         </div>
       </header>
 
@@ -399,7 +410,17 @@ export default function App() {
       )}
 
       {view === "board" && (
-        <CaptureBar onCapture={capture} query={query} onQuery={setQuery} />
+        <CaptureBar
+          onCapture={capture}
+          query={query}
+          onQuery={setQuery}
+          sessionTopic={activeSession?.topic ?? null}
+          sessionOnly={sessionOnly}
+          onToggleSession={() => setSessionOnly((v) => !v)}
+          captureTier={captureTier}
+          extraTiers={{ ram: showRam, storage: showStorage }}
+          onSelectTier={selectTier}
+        />
       )}
 
       <main className={`main ${selected ? "with-panel" : ""}`}>
@@ -407,9 +428,12 @@ export default function App() {
           <Board
             debts={visibleOpen}
             selectedId={selectedId}
+            visibleTiers={visibleTiers}
             onSelect={(id) => setSelectedId(id)}
             onMove={async (id, tier) => {
               await db.setTier(id, tier);
+              if (tier === "ram") setShowRam(true);
+              if (tier === "storage") setShowStorage(true);
               await refresh();
             }}
           />
@@ -418,7 +442,6 @@ export default function App() {
         {view === "graph" && (
           <GraphView
             debts={allDebts}
-            sessions={sessions}
             selectedId={selectedId}
             onSelectDebt={(id) => setSelectedId(id)}
             showToast={showToast}
@@ -428,6 +451,8 @@ export default function App() {
         {view === "review" && (
           <ReviewPanel
             debts={openDebts}
+            dueChecks={dueChecks}
+            graphEdges={graphEdges}
             activeSession={activeSession}
             digActive={activeDig !== null}
             onSelect={(id) => setSelectedId(id)}
@@ -442,58 +467,36 @@ export default function App() {
               await refresh();
               showToast(`${ids.length}개 항목을 방출했습니다`);
             }}
+            onStillHolds={async (id) => {
+              const result = await db.advanceReview(id);
+              await refresh();
+              showToast(
+                result === "done"
+                  ? "이 Check는 지도에 남았습니다"
+                  : "다음에 다시 만납니다"
+              );
+            }}
+            onReopen={async (id) => {
+              await db.reopenDebt(id);
+              setSelectedId(id);
+              await refresh();
+              showToast("다시 열었습니다");
+            }}
           />
         )}
 
         {view === "resolved" && (
-          <div className="archive-wrap">
-            <div className="archive-toolbar">
-              <div className="view-toggle">
-                <button
-                  className={archiveFilter === "resolved" ? "active" : ""}
-                  onClick={() => setArchiveFilter("resolved")}
-                >
-                  탐험 완료 {resolvedDebts.length}
-                </button>
-                <button
-                  className={archiveFilter === "evicted" ? "active" : ""}
-                  onClick={() => setArchiveFilter("evicted")}
-                >
-                  방출됨 {evictedDebts.length}
-                </button>
-              </div>
-              <input
-                className="board-search"
-                placeholder="보관함에서 찾기"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </div>
-            <div className="resolved-list">
-              {archiveItems.length === 0 && (
-                <div className="column-empty">
-                  {archiveFilter === "resolved"
-                    ? "아직 탐험 완료한 영역이 없습니다"
-                    : "방출된 항목이 없습니다"}
-                </div>
-              )}
-              {archiveItems.map((d) => (
-                <div
-                  key={d.id}
-                  className={`resolved-item ${d.id === selectedId ? "selected" : ""}`}
-                  onClick={() => setSelectedId(d.id)}
-                >
-                  <div className="debt-title">{d.title}</div>
-                  <div className="resolved-item-summary">
-                    {archiveFilter === "resolved"
-                      ? d.summary || checkExcerpt(d.check_content)
-                      : htmlToText(d.note) || "(메모 없음)"}
-                  </div>
-                  {d.session_topic && <div className="debt-session">◈ {d.session_topic}</div>}
-                </div>
-              ))}
-            </div>
-          </div>
+          <ArchivePanel
+            items={archiveItems}
+            filter={archiveFilter}
+            resolvedCount={resolvedDebts.length}
+            evictedCount={evictedDebts.length}
+            query={query}
+            selectedId={selectedId}
+            onFilter={setArchiveFilter}
+            onQuery={setQuery}
+            onSelect={setSelectedId}
+          />
         )}
 
         {selected && (
@@ -502,6 +505,25 @@ export default function App() {
             digActive={activeDig !== null}
             onStartDig={startDig}
             attachmentsVersion={attachmentsVersion}
+            diggingThis={activeDig?.id === selected.id}
+            childrenDebts={allDebts.filter((d) => d.parent_id === selected.id)}
+            onSelectRelated={(id) => setSelectedId(id)}
+            onSplit={async (parentId, title, note) => {
+              const parent = allDebts.find((d) => d.id === parentId);
+              await db.createDebt({
+                title,
+                note,
+                tier: "cache",
+                sessionId: parent?.session_id ?? activeSessionRef.current?.id ?? null,
+                parentId,
+              });
+              await refresh();
+              showToast("Cache에 갈래를 만들었습니다");
+            }}
+            onSaveSourceFile={async (id, path) => {
+              await db.updateDebt(id, { source_file: path });
+              await refresh();
+            }}
             onClose={() => setSelectedId(null)}
             forceWriter={forceWriter}
             onForceWriterHandled={() => setForceWriter(null)}
@@ -573,9 +595,9 @@ export default function App() {
           <div className="drop-overlay-text">
             {selectedId !== null
               ? getImageSink()
-                ? "놓으면 에디터에 사진이 들어갑니다 (다른 파일은 첨부)"
-                : "놓으면 선택된 항목에 첨부됩니다"
-              : "놓으면 인박스에 추가됩니다"}
+                ? "놓으면 에디터에 사진이 들어갑니다 (PDF는 출처, 다른 파일은 첨부)"
+                : "놓으면 선택된 항목에 붙습니다 (PDF는 출처 파일)"
+              : "놓으면 인박스에 추가됩니다 (PDF는 출처가 있는 항목으로)"}
           </div>
         </div>
       )}

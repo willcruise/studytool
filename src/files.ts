@@ -15,6 +15,15 @@ export async function openAttachment(path: string): Promise<void> {
   await openPath(path);
 }
 
+export function isPaperPath(path: string): boolean {
+  return /\.(pdf|epub|djvu|ps)$/i.test(path);
+}
+
+export function titleFromFilename(path: string): string {
+  const name = basename(path);
+  return name.replace(/\.[^.]+$/, "") || name;
+}
+
 export function basename(path: string): string {
   const name = path.split("/").pop() ?? path;
   // stored files are prefixed with "<millis>-"; strip it for display

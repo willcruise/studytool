@@ -6,6 +6,12 @@ interface Props {
   onCapture: (title: string, tier: Tier, sourceUrl: string | null, note: string) => void;
   query: string;
   onQuery: (q: string) => void;
+  sessionTopic: string | null;
+  sessionOnly: boolean;
+  onToggleSession: () => void;
+  captureTier: Tier;
+  extraTiers: { ram: boolean; storage: boolean };
+  onSelectTier: (tier: Tier) => void;
 }
 
 export function parseInput(raw: string): { title: string; sourceUrl: string | null; note: string } {
@@ -26,16 +32,25 @@ export function parseInput(raw: string): { title: string; sourceUrl: string | nu
 }
 
 export const CaptureBar = forwardRef<HTMLTextAreaElement, Props>(function CaptureBar(
-  { onCapture, query, onQuery },
+  {
+    onCapture,
+    query,
+    onQuery,
+    sessionTopic,
+    sessionOnly,
+    onToggleSession,
+    captureTier,
+    extraTiers,
+    onSelectTier,
+  },
   ref
 ) {
   const [value, setValue] = useState("");
-  const [tier, setTier] = useState<Tier>("inbox");
 
   const submit = () => {
     const { title, sourceUrl, note } = parseInput(value);
     if (!title) return;
-    onCapture(title, tier, sourceUrl, note);
+    onCapture(title, captureTier, sourceUrl, note);
     setValue("");
   };
 
@@ -62,17 +77,36 @@ export const CaptureBar = forwardRef<HTMLTextAreaElement, Props>(function Captur
         onChange={(e) => onQuery(e.target.value)}
       />
       <div className="capture-tiers">
-        {TIER_ORDER.map((t) => (
+        {TIER_ORDER.map((t) => {
+          const on =
+            t === "ram" ? extraTiers.ram : t === "storage" ? extraTiers.storage : captureTier === t;
+          const title =
+            t === "ram" || t === "storage"
+              ? on
+                ? `${TIER_META[t].hint} · 다시 누르면 열을 숨깁니다`
+                : `${TIER_META[t].hint} · 누르면 열을 엽니다`
+              : TIER_META[t].hint;
+          return (
+            <button
+              key={t}
+              className={`tier-chip ${on ? "active" : ""}`}
+              style={on ? { borderColor: TIER_META[t].color, color: TIER_META[t].color } : {}}
+              onClick={() => onSelectTier(t)}
+              title={title}
+            >
+              {TIER_META[t].label}
+            </button>
+          );
+        })}
+        {sessionTopic && (
           <button
-            key={t}
-            className={`tier-chip ${tier === t ? "active" : ""}`}
-            style={tier === t ? { borderColor: TIER_META[t].color, color: TIER_META[t].color } : {}}
-            onClick={() => setTier(t)}
-            title={TIER_META[t].hint}
+            className={`filter-chip ${sessionOnly ? "active" : ""}`}
+            onClick={onToggleSession}
+            title={sessionOnly ? "지금 세션 항목만 보드에 표시 중" : "모든 세션을 표시 중"}
           >
-            {TIER_META[t].label}
+            {sessionOnly ? `이 세션만` : "모든 세션"}
           </button>
-        ))}
+        )}
       </div>
     </div>
   );

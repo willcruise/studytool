@@ -1,5 +1,5 @@
 {
-  "name": "tauri-app",
+  "name": "study-map",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "dev:app": "tauri dev",
+    "dist:mac": "tauri build --bundles app,dmg"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

@@ -1,6 +1,7 @@
 import Database from "@tauri-apps/plugin-sql";
-import type { Attachment, Debt, Session, Status, Tier } from "./types";
-import { toEditorHtml } from "./richtext";
+import type { Attachment, Debt, GraphEdge, GraphMeta, Session, Stats, Tier } from "./types";
+import { escapeHtml, toEditorHtml } from "./richtext";
+import { minutesBetween } from "./time";
 
 let db: Database | null = null;
 
@@ -59,18 +60,12 @@ export async function activateSession(id: number | null): Promise<void> {
 // ---------- debts ----------
 
 const DEBT_SELECT = `
-  SELECT d.*, s.topic AS session_topic,
+  SELECT d.*, s.topic AS session_topic, p.title AS parent_title,
     (SELECT COUNT(*) FROM attachments a WHERE a.debt_id = d.id) AS attachment_count
-  FROM debts d LEFT JOIN sessions s ON s.id = d.session_id
+  FROM debts d
+  LEFT JOIN sessions s ON s.id = d.session_id
+  LEFT JOIN debts p ON p.id = d.parent_id
 `;
-
-export async function listDebts(status: Status = "open"): Promise<Debt[]> {
-  const d = await getDb();
-  return d.select<Debt[]>(
-    `${DEBT_SELECT} WHERE d.status = $1 ORDER BY d.created_at DESC`,
-    [status]
-  );
-}
 
 export async function listAllDebts(): Promise<Debt[]> {
   const d = await getDb();
@@ -83,17 +78,21 @@ export async function createDebt(input: {
   note?: string;
   sessionId?: number | null;
   sourceUrl?: string | null;
+  sourceFile?: string | null;
+  parentId?: number | null;
 }): Promise<number> {
   const d = await getDb();
   const res = await d.execute(
-    `INSERT INTO debts (title, tier, note, session_id, source_url)
-     VALUES ($1, $2, $3, $4, $5)`,
+    `INSERT INTO debts (title, tier, note, session_id, source_url, source_file, parent_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [
       input.title,
       input.tier ?? "inbox",
       input.note ? toEditorHtml(input.note) : "",
       input.sessionId ?? null,
       input.sourceUrl ?? null,
+      input.sourceFile ?? null,
+      input.parentId ?? null,
     ]
   );
   return res.lastInsertId ?? 0;
@@ -114,6 +113,7 @@ export async function updateDebt(
     title?: string;
     note?: string;
     source_url?: string | null;
+    source_file?: string | null;
     session_id?: number | null;
     check_content?: string;
   }
@@ -137,6 +137,7 @@ export async function resolveDebt(id: number, summary: string): Promise<void> {
   await d.execute(
     `UPDATE debts SET status = 'resolved', summary = $1,
      resolved_at = datetime('now'), dig_until = NULL, dig_started_at = NULL,
+     next_review_at = datetime('now', '+3 days'), review_stage = 0,
      last_touched = datetime('now') WHERE id = $2`,
     [summary, id]
   );
@@ -147,6 +148,7 @@ export async function reopenDebt(id: number): Promise<void> {
   await d.execute(
     `UPDATE debts SET status = 'open', resolved_at = NULL,
      dig_until = NULL, dig_started_at = NULL,
+     next_review_at = NULL, review_stage = 0,
      last_touched = datetime('now') WHERE id = $1`,
     [id]
   );
@@ -156,6 +158,7 @@ export async function evictDebt(id: number): Promise<void> {
   const d = await getDb();
   await d.execute(
     `UPDATE debts SET status = 'evicted', dig_until = NULL, dig_started_at = NULL,
+     next_review_at = NULL,
      last_touched = datetime('now') WHERE id = $1`,
     [id]
   );
@@ -163,6 +166,7 @@ export async function evictDebt(id: number): Promise<void> {
 
 export async function deleteDebt(id: number): Promise<void> {
   const d = await getDb();
+  await d.execute("UPDATE debts SET parent_id = NULL WHERE parent_id = $1", [id]);
   await d.execute(
     "DELETE FROM graph_edges WHERE a_debt = $1 OR b_debt = $1",
     [id]
@@ -170,6 +174,31 @@ export async function deleteDebt(id: number): Promise<void> {
   await d.execute("DELETE FROM graph_nodes WHERE debt_id = $1", [id]);
   await d.execute("DELETE FROM attachments WHERE debt_id = $1", [id]);
   await d.execute("DELETE FROM debts WHERE id = $1", [id]);
+}
+
+export async function advanceReview(id: number): Promise<"next" | "done"> {
+  const d = await getDb();
+  const rows = await d.select<{ review_stage: number }[]>(
+    "SELECT review_stage FROM debts WHERE id = $1",
+    [id]
+  );
+  const stage = rows[0]?.review_stage ?? 0;
+  if (stage >= 2) {
+    await d.execute(
+      `UPDATE debts SET next_review_at = NULL, review_stage = 3,
+       last_touched = datetime('now') WHERE id = $1`,
+      [id]
+    );
+    return "done";
+  }
+  const offset = stage === 0 ? "+14 days" : "+45 days";
+  await d.execute(
+    `UPDATE debts SET review_stage = review_stage + 1,
+     next_review_at = datetime('now', $1),
+     last_touched = datetime('now') WHERE id = $2`,
+    [offset, id]
+  );
+  return "next";
 }
 
 // ---------- dig (timeboxing) ----------
@@ -182,8 +211,7 @@ export async function startDig(id: number, minutes: number): Promise<void> {
   for (const row of open) {
     let spent = 0;
     if (row.dig_started_at) {
-      const start = new Date(row.dig_started_at.replace(" ", "T") + "Z").getTime();
-      spent = Math.max(0, Math.round((Date.now() - start) / 60000));
+      spent = minutesBetween(row.dig_started_at);
     }
     await d.execute(
       `UPDATE debts SET dig_until = NULL, dig_started_at = NULL,
@@ -214,10 +242,7 @@ export async function appendNoteLog(id: number, text: string): Promise<void> {
   if (!trimmed) return;
   const d = await getDb();
   const stamp = new Date().toISOString().slice(0, 10);
-  const escaped = trimmed
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  const escaped = escapeHtml(trimmed);
   const html = `<p>[${stamp} 파보기] ${escaped}</p>`;
   await d.execute(
     `UPDATE debts SET note = CASE WHEN note = '' THEN $1 ELSE note || $1 END,
@@ -254,17 +279,6 @@ export async function removeAttachment(id: number): Promise<void> {
 }
 
 // ---------- user-defined graphs ----------
-
-export interface GraphMeta {
-  id: number;
-  name: string;
-  created_at: string;
-}
-
-export interface GraphEdge {
-  a_debt: number;
-  b_debt: number;
-}
 
 export async function listGraphs(): Promise<GraphMeta[]> {
   const d = await getDb();
@@ -318,6 +332,11 @@ export async function removeGraphNode(graphId: number, debtId: number): Promise<
   ]);
 }
 
+export async function listAllGraphEdges(): Promise<GraphEdge[]> {
+  const d = await getDb();
+  return d.select<GraphEdge[]>("SELECT a_debt, b_debt FROM graph_edges");
+}
+
 export async function listGraphEdges(graphId: number): Promise<GraphEdge[]> {
   const d = await getDb();
   return d.select<GraphEdge[]>(
@@ -354,11 +373,6 @@ export async function removeGraphEdge(
 }
 
 // ---------- stats ----------
-
-export interface Stats {
-  open: number;
-  resolved: number;
-}
 
 export async function getStats(): Promise<Stats> {
   const d = await getDb();

@@ -3,9 +3,9 @@ import type { Attachment, Debt, Session } from "../types";
 import { TIER_META } from "../types";
 import { listAttachments, removeAttachment } from "../db";
 import { basename, openAttachment } from "../files";
-import { relativeAge } from "./DebtCard";
+import { relativeAge } from "../time";
 import { ConfirmButton } from "./ConfirmButton";
-import { RichEditor } from "./RichEditor";
+import { RichEditor, type RichEditorHandle } from "./RichEditor";
 import { CHECK_MIN_CHARS, checkIsReady } from "../richtext";
 
 interface Props {
@@ -27,6 +27,11 @@ interface Props {
   onForceWriterHandled?: () => void;
   /** bumped by the parent whenever attachments change externally (e.g. file drop) */
   attachmentsVersion: number;
+  diggingThis?: boolean;
+  childrenDebts: Debt[];
+  onSelectRelated: (id: number) => void;
+  onSplit: (parentId: number, title: string, note: string) => void;
+  onSaveSourceFile: (id: number, path: string | null) => void;
 }
 
 export function DetailPanel({
@@ -47,6 +52,11 @@ export function DetailPanel({
   forceWriter,
   onForceWriterHandled,
   attachmentsVersion,
+  diggingThis = false,
+  childrenDebts,
+  onSelectRelated,
+  onSplit,
+  onSaveSourceFile,
 }: Props) {
   const [note, setNote] = useState(debt.note);
   const [check, setCheck] = useState(debt.check_content ?? "");
@@ -57,6 +67,9 @@ export function DetailPanel({
   const [urlValue, setUrlValue] = useState(debt.source_url ?? "");
   const [writer, setWriter] = useState<null | "note" | "check">(null);
   const [noteRev, setNoteRev] = useState(0);
+  const [splitTitle, setSplitTitle] = useState("");
+  const [splitting, setSplitting] = useState(false);
+  const noteEditorRef = useRef<RichEditorHandle>(null);
   const noteTimer = useRef<number>(0);
   const checkTimer = useRef<number>(0);
   const noteRef = useRef(note);
@@ -102,6 +115,8 @@ export function DetailPanel({
     setUrlValue(debt.source_url ?? "");
     setWriter(null);
     setNoteRev(0);
+    setSplitTitle("");
+    setSplitting(false);
     origNoteRef.current = debt.note;
     origCheckRef.current = debt.check_content ?? "";
     editingIdRef.current = debt.id;
@@ -150,6 +165,16 @@ export function DetailPanel({
   const close = () => {
     flush();
     onClose();
+  };
+
+  const submitSplit = () => {
+    const selected = noteEditorRef.current?.selectedText() ?? "";
+    const typed = splitTitle.trim();
+    const title = (typed || selected.split("\n")[0] || "").slice(0, 160).trim();
+    if (!title) return;
+    const note = selected && selected !== title ? selected : "";
+    onSplit(debt.id, title, note);
+    setSplitTitle("");
   };
 
   const saveTitle = () => {
@@ -224,6 +249,11 @@ export function DetailPanel({
         {relativeAge(debt.created_at)}
         {debt.time_spent_min > 0 && <span> · 지금까지 {debt.time_spent_min}분 탐색</span>}
       </div>
+      {debt.parent_id && debt.parent_title && (
+        <button className="parent-chip" onClick={() => onSelectRelated(debt.parent_id!)}>
+          원본 ↳ {debt.parent_title}
+        </button>
+      )}
 
       <label className="detail-label">세션</label>
       <select
@@ -270,6 +300,25 @@ export function DetailPanel({
         </button>
       )}
 
+      {debt.source_file ? (
+        <div className="detail-url-row">
+          <button className="detail-link source-file-btn" onClick={() => openAttachment(debt.source_file!)}>
+            📄 {basename(debt.source_file)}
+          </button>
+          <button
+            className="attachment-remove"
+            title="출처 파일 제거"
+            onClick={() => onSaveSourceFile(debt.id, null)}
+          >
+            ✕
+          </button>
+        </div>
+      ) : debt.status === "open" ? (
+        <div className="attachment-empty source-file-hint">
+          PDF·논문을 창에 드롭하면 출처 파일이 됩니다
+        </div>
+      ) : null}
+
       <label className="detail-label">메모</label>
       {writer === "note" && <div className="writer-backdrop" onClick={() => { flush(); setWriter(null); }} />}
       <div className={`editor-dock ${writer === "note" ? "open" : ""}`}>
@@ -282,6 +331,7 @@ export function DetailPanel({
           </header>
         )}
         <RichEditor
+          ref={noteEditorRef}
           key={`${debt.id}-note-${noteRev}`}
           debtId={debt.id}
           html={note}
@@ -296,6 +346,54 @@ export function DetailPanel({
           onImageInserted={() => listAttachments(debt.id).then(setAttachments)}
         />
       </div>
+
+      {debt.status === "open" && (diggingThis || splitting) && (
+        <div className={`split-box ${diggingThis ? "hot" : ""}`}>
+          <label className="detail-label">
+            {diggingThis ? "파보는 중 — 갈래로 쪼개기" : "갈래로 쪼개기"}
+          </label>
+          <p className="split-hint">
+            메모에서 줄을 선택한 뒤 만들거나, 제목을 직접 적으세요. Cache에 새 카드가 생기고 원본은 남습니다.
+          </p>
+          <div className="split-row">
+            <input
+              className="detail-url-input"
+              placeholder="새 카드 제목 (또는 메모에서 선택)"
+              value={splitTitle}
+              onChange={(e) => setSplitTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  submitSplit();
+                }
+              }}
+            />
+            <button className="ghost-btn" onClick={submitSplit}>
+              갈래 만들기
+            </button>
+          </div>
+        </div>
+      )}
+      {debt.status === "open" && !diggingThis && !splitting && (
+        <button className="add-link-btn" onClick={() => setSplitting(true)}>
+          ＋ 갈래로 쪼개기
+        </button>
+      )}
+
+      {childrenDebts.length > 0 && (
+        <div className="child-list">
+          <label className="detail-label">갈래 ({childrenDebts.length})</label>
+          {childrenDebts.map((c) => (
+            <button key={c.id} className="child-chip" onClick={() => onSelectRelated(c.id)}>
+              <span className="picker-dot" style={{ background: TIER_META[c.tier].color }} />
+              {c.title}
+              {c.status !== "open" && (
+                <span className="child-status">{c.status === "resolved" ? "완료" : "방출"}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
 
       <label className="detail-label">
         Check <span className="label-required">핵심 · 상환 전 필수</span>
@@ -332,7 +430,11 @@ export function DetailPanel({
       <label className="detail-label">첨부 ({attachments.length})</label>
       <div className="attachment-list">
         {attachments.length === 0 && (
-          <div className="attachment-empty">이 패널이 열린 상태에서 파일을 창에 드롭하면 여기에 첨부됩니다</div>
+          <div className="attachment-empty">
+            {debt.source_file
+              ? "다른 파일은 여기에 첨부됩니다"
+              : "이 패널이 열린 채 파일을 드롭하세요"}
+          </div>
         )}
         {attachments.map((a) => (
           <div key={a.id} className="attachment-row">

@@ -1,13 +1,10 @@
-import type { Debt, Session } from "../types";
+import type { Debt, GraphEdge, Session } from "../types";
 import { TIER_META } from "../types";
-import { parseUtc } from "./Dig";
+import { checkExcerpt } from "../richtext";
+import { daysSince, parseUtc } from "../time";
 import { ConfirmButton } from "./ConfirmButton";
 
 const GC_IDLE_DAYS = 45;
-
-function daysSince(sqliteUtc: string): number {
-  return (Date.now() - parseUtc(sqliteUtc)) / 86_400_000;
-}
 
 interface Scored {
   debt: Debt;
@@ -15,8 +12,28 @@ interface Scored {
   reasons: string[];
 }
 
-function scoreDebts(debts: Debt[], activeSession: Session | null): Scored[] {
-  const tierWeight = { l1: 4, ram: 2, inbox: 1, storage: 0.5 } as const;
+function neighborMap(edges: GraphEdge[]): Map<number, number[]> {
+  const map = new Map<number, number[]>();
+  const add = (a: number, b: number) => {
+    const list = map.get(a) ?? [];
+    list.push(b);
+    map.set(a, list);
+  };
+  for (const e of edges) {
+    add(e.a_debt, e.b_debt);
+    add(e.b_debt, e.a_debt);
+  }
+  return map;
+}
+
+function scoreDebts(
+  debts: Debt[],
+  activeSession: Session | null,
+  edges: GraphEdge[]
+): Scored[] {
+  const byId = new Map(debts.map((d) => [d.id, d]));
+  const neighbors = neighborMap(edges);
+  const tierWeight = { cache: 4, ram: 2, inbox: 1, storage: 0.5 } as const;
   return debts
     .map((debt) => {
       const reasons: string[] = [];
@@ -33,6 +50,18 @@ function scoreDebts(debts: Debt[], activeSession: Session | null): Scored[] {
       if (age >= 1) reasons.push(`${Math.floor(age)}일 경과`);
 
       if (debt.time_spent_min > 0) reasons.push(`이미 ${debt.time_spent_min}분 투자함`);
+
+      const linked = (neighbors.get(debt.id) ?? [])
+        .map((id) => byId.get(id))
+        .filter((d): d is Debt => !!d && d.status === "open");
+      if (linked.some((d) => d.tier === "cache")) {
+        score += 3;
+        reasons.push("Cache 항목과 지도에서 연결됨");
+      } else if (linked.length > 0) {
+        score += 2;
+        reasons.push("지도에서 다른 미탐험과 연결됨");
+      }
+
       return { debt, score, reasons };
     })
     .sort((a, b) => b.score - a.score);
@@ -42,7 +71,7 @@ function gcCandidates(debts: Debt[]): Debt[] {
   return debts
     .filter(
       (d) =>
-        d.tier !== "l1" &&
+        d.tier !== "cache" &&
         d.touch_count <= 2 &&
         daysSince(d.last_touched) >= GC_IDLE_DAYS
     )
@@ -50,29 +79,66 @@ function gcCandidates(debts: Debt[]): Debt[] {
 }
 
 interface Props {
-  debts: Debt[]; // open debts only
+  debts: Debt[];
+  dueChecks: Debt[];
+  graphEdges: GraphEdge[];
   activeSession: Session | null;
   digActive: boolean;
   onSelect: (id: number) => void;
   onStartDig: (id: number, minutes: number) => void;
   onEvict: (id: number) => void;
   onEvictMany: (ids: number[]) => void;
+  onStillHolds: (id: number) => void;
+  onReopen: (id: number) => void;
 }
 
 export function ReviewPanel({
   debts,
+  dueChecks,
+  graphEdges,
   activeSession,
   digActive,
   onSelect,
   onStartDig,
   onEvict,
   onEvictMany,
+  onStillHolds,
+  onReopen,
 }: Props) {
-  const top = scoreDebts(debts, activeSession).slice(0, 3);
+  const top = scoreDebts(debts, activeSession, graphEdges).slice(0, 3);
   const gc = gcCandidates(debts);
 
   return (
     <div className="review">
+      <section className="review-section">
+        <h3 className="review-heading">다시 만나기</h3>
+        <p className="review-desc">
+          예전에 쓴 Check입니다. 지금 읽어도 성립하면 넘기고, 흔들리면 다시 엽니다.
+        </p>
+        {dueChecks.length === 0 && (
+          <div className="column-empty">오늘은 다시 볼 Check가 없습니다.</div>
+        )}
+        {dueChecks.map((debt) => (
+          <div key={debt.id} className="review-card review-check">
+            <div className="review-body">
+              <div className="debt-title">{debt.title}</div>
+              <p className="review-check-body">{checkExcerpt(debt.check_content, 360)}</p>
+            </div>
+            <div className="review-actions">
+              <button className="primary-btn" onClick={() => onStillHolds(debt.id)}>
+                아직 성립한다
+              </button>
+              <button className="ghost-btn" onClick={() => onReopen(debt.id)}>
+                다시 열기
+              </button>
+              <button className="ghost-btn" onClick={() => onSelect(debt.id)}>
+                원문
+              </button>
+            </div>
+          </div>
+        ))}
+      </section>
+
       <section className="review-section">
         <h3 className="review-heading">오늘의 상환 제안</h3>
         <p className="review-desc">

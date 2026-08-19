@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -30,16 +30,23 @@ function insertStoredImage(editor: Editor, img: StoredImage) {
     .run();
 }
 
-export function RichEditor({
-  debtId,
-  html,
-  placeholder,
-  expanded = false,
-  onChange,
-  onExpand,
-  onCollapse,
-  onImageInserted,
-}: Props) {
+export interface RichEditorHandle {
+  selectedText: () => string;
+}
+
+export const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEditor(
+  {
+    debtId,
+    html,
+    placeholder,
+    expanded = false,
+    onChange,
+    onExpand,
+    onCollapse,
+    onImageInserted,
+  },
+  ref
+) {
   const debtIdRef = useRef(debtId);
   debtIdRef.current = debtId;
   const onChangeRef = useRef(onChange);
@@ -88,6 +95,19 @@ export function RichEditor({
     },
     onUpdate: ({ editor: ed }) => onChangeRef.current(ed.getHTML()),
   });
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      selectedText: () => {
+        if (!editor) return "";
+        const { from, to } = editor.state.selection;
+        if (from === to) return "";
+        return editor.state.doc.textBetween(from, to, "\n").trim();
+      },
+    }),
+    [editor]
+  );
 
   insertRef.current = async (files: File[]) => {
     if (!editor) return;
@@ -196,4 +216,4 @@ export function RichEditor({
       <EditorContent editor={editor} />
     </div>
   );
-}
+});

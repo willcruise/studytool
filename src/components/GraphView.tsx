@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ForceGraph from "force-graph";
-import type { Debt, Session, Tier } from "../types";
+import type { Debt, GraphEdge, GraphMeta, Tier } from "../types";
 import { TIER_META, TIER_ORDER } from "../types";
 import * as db from "../db";
 import { ConfirmButton } from "./ConfirmButton";
@@ -25,20 +25,19 @@ interface GLink {
 
 interface Props {
   debts: Debt[];
-  sessions: Session[];
   selectedId: number | null;
   onSelectDebt: (id: number) => void;
   showToast: (msg: string) => void;
 }
 
-export function GraphView({ debts, sessions, selectedId, onSelectDebt, showToast }: Props) {
+export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<ForceGraph<GNode, GLink> | null>(null);
 
-  const [graphs, setGraphs] = useState<db.GraphMeta[]>([]);
+  const [graphs, setGraphs] = useState<GraphMeta[]>([]);
   const [currentGraphId, setCurrentGraphId] = useState<number | null>(null);
   const [nodeIds, setNodeIds] = useState<number[]>([]);
-  const [edges, setEdges] = useState<db.GraphEdge[]>([]);
+  const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTier, setPickerTier] = useState<Tier | "all">("all");
   const [linkMode, setLinkMode] = useState(false);
@@ -207,24 +206,8 @@ export function GraphView({ debts, sessions, selectedId, onSelectDebt, showToast
 
     const visible = debts.filter((d) => d.status !== "evicted");
 
-    if (currentGraphId === null) {
-      // automatic map: sessions as hubs
-      const usedSessionIds = new Set<number>();
-      for (const d of visible) if (d.session_id !== null) usedSessionIds.add(d.session_id);
-
-      for (const s of sessions) {
-        if (usedSessionIds.has(s.id)) {
-          nodes.push({ id: `s${s.id}`, kind: "session", label: s.topic, color: "#539bf5", val: 8 });
-        }
-      }
-      for (const d of visible) {
-        nodes.push(debtNode(d));
-        if (d.session_id !== null && usedSessionIds.has(d.session_id)) {
-          links.push({ source: `d${d.id}`, target: `s${d.session_id}` });
-        }
-      }
-    } else {
-      // user-defined graph: chosen debts + manual edges (+ faint same-session hints)
+    if (currentGraphId !== null) {
+      // only nodes the user added to this graph
       const idSet = new Set(nodeIds);
       const included = visible.filter((d) => idSet.has(d.id));
       for (const d of included) nodes.push(debtNode(d));
@@ -257,7 +240,7 @@ export function GraphView({ debts, sessions, selectedId, onSelectDebt, showToast
     }
 
     graphRef.current?.graphData({ nodes, links });
-  }, [debts, sessions, currentGraphId, nodeIds, edges]);
+  }, [debts, currentGraphId, nodeIds, edges]);
 
   // ---------- toolbar actions ----------
 
@@ -309,7 +292,7 @@ export function GraphView({ debts, sessions, selectedId, onSelectDebt, showToast
             setCurrentGraphId(e.target.value ? Number(e.target.value) : null);
           }}
         >
-          <option value="">전체 지도 (자동)</option>
+          <option value="">그래프 선택</option>
           {graphs.map((g) => (
             <option key={g.id} value={g.id}>
               {g.name}
@@ -366,13 +349,13 @@ export function GraphView({ debts, sessions, selectedId, onSelectDebt, showToast
         <span className="toolbar-sep" />
         <button
           className={`ghost-btn ${pickerOpen ? "toolbar-active" : ""} ${!currentGraph ? "toolbar-dim" : ""}`}
-          title={currentGraph ? "열린 항목에서 노드 추가" : "자동 지도에는 노드를 직접 추가할 수 없습니다 — 새 그래프를 만드세요"}
+          title={currentGraph ? "열린 항목에서 노드 추가" : "그래프를 먼저 만든 뒤 담을 항목을 고르세요"}
           onClick={() => {
             if (currentGraph) {
               setPickerOpen((v) => !v);
             } else {
               setCreating(true);
-              showToast("먼저 새 그래프를 만들어 주세요 — 이름을 입력하면 바로 노드를 담을 수 있습니다");
+              showToast("먼저 새 그래프를 만들어 주세요 — 이름은 입력한 뒤 담을 항목을 고릅니다");
             }
           }}
         >
@@ -413,12 +396,21 @@ export function GraphView({ debts, sessions, selectedId, onSelectDebt, showToast
               ? "연결할 두 번째 노드를 클릭하세요 (같은 노드를 다시 클릭하면 취소)"
               : "노드 두 개를 차례로 클릭하면 연결됩니다 · 파란 연결선 클릭 시 삭제"
             : "노드 클릭: 상세 보기 · 노드 우클릭: 그래프에서 제거"
-          : "자동 지도: 세션-부채 구조를 자동으로 보여줍니다 · 직접 노드를 고르려면 새 그래프를 만드세요"}
+          : "노드는 자동으로 생기지 않습니다 · 그래프를 만들고 ＋ 노드 추가로 담으세요"}
       </div>
+
+      {!currentGraph && !creating && (
+        <div className="graph-empty">
+          <p>빈 지도입니다. 새 항목은 그래프에 자동으로 올라오지 않습니다.</p>
+          <button className="primary-btn" onClick={() => setCreating(true)}>
+            ＋ 새 그래프
+          </button>
+        </div>
+      )}
 
       {currentGraph && nodeIds.length === 0 && !pickerOpen && (
         <div className="graph-empty">
-          <p>빈 지도입니다</p>
+          <p>빈 지도입니다. 담을 항목을 고르세요.</p>
           <button className="primary-btn" onClick={() => setPickerOpen(true)}>
             ＋ 노드 추가
           </button>
@@ -480,8 +472,7 @@ export function GraphView({ debts, sessions, selectedId, onSelectDebt, showToast
       )}
 
       <div className="graph-legend">
-        <span><i style={{ background: "#539bf5" }} /> 세션(주제)</span>
-        <span><i style={{ background: TIER_META.l1.color }} /> L1</span>
+        <span><i style={{ background: TIER_META.cache.color }} /> Cache</span>
         <span><i style={{ background: TIER_META.ram.color }} /> RAM</span>
         <span><i style={{ background: TIER_META.storage.color }} /> Storage</span>
         <span><i style={{ background: TIER_META.inbox.color }} /> Inbox</span>

@@ -1,18 +1,19 @@
 import type { Debt, Tier } from "../types";
-import { TIER_META, TIER_ORDER } from "../types";
+import { TIER_META } from "../types";
 import { DebtCard } from "./DebtCard";
 
 interface Props {
   debts: Debt[];
   selectedId: number | null;
+  visibleTiers: Tier[];
   onSelect: (id: number) => void;
   onMove: (id: number, tier: Tier) => void;
 }
 
-export function Board({ debts, selectedId, onSelect, onMove }: Props) {
+export function Board({ debts, selectedId, visibleTiers, onSelect, onMove }: Props) {
   return (
-    <div className="board">
-      {TIER_ORDER.map((tier) => {
+    <div className={`board cols-${visibleTiers.length}`}>
+      {visibleTiers.map((tier) => {
         const items = debts.filter((d) => d.tier === tier);
         const meta = TIER_META[tier];
         return (

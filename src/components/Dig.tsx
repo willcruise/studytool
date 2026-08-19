@@ -1,10 +1,7 @@
 import { useState } from "react";
 import type { Debt } from "../types";
 import { checkIsReady } from "../richtext";
-
-export function parseUtc(sqliteUtc: string): number {
-  return new Date(sqliteUtc.replace(" ", "T") + "Z").getTime();
-}
+import { parseUtc } from "../time";
 
 function fmt(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));
