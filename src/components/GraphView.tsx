@@ -4,6 +4,7 @@ import type { Debt, GraphEdge, GraphMeta, Tier } from "../types";
 import { TIER_META, TIER_ORDER } from "../types";
 import * as db from "../db";
 import { ConfirmButton } from "./ConfirmButton";
+import { useI18n } from "../i18n";
 
 interface GNode {
   id: string;
@@ -31,6 +32,7 @@ interface Props {
 }
 
 export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props) {
+  const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<ForceGraph<GNode, GLink> | null>(null);
 
@@ -264,7 +266,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
     await db.renameGraph(currentGraph.id, name);
     setRenaming(false);
     await loadGraphs();
-    showToast("그래프 이름을 바꿨습니다");
+    showToast(t("toastGraphRenamed"));
   };
 
   const currentGraph = graphs.find((g) => g.id === currentGraphId) ?? null;
@@ -292,7 +294,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
             setCurrentGraphId(e.target.value ? Number(e.target.value) : null);
           }}
         >
-          <option value="">그래프 선택</option>
+          <option value="">{t("pickGraph")}</option>
           {graphs.map((g) => (
             <option key={g.id} value={g.id}>
               {g.name}
@@ -305,7 +307,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
             <input
               autoFocus
               className="session-input graph-rename-input"
-              placeholder="그래프 이름"
+              placeholder={t("graphName")}
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
               onKeyDown={(e) => {
@@ -317,7 +319,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
           ) : (
             <button
               className="ghost-btn graph-name-btn"
-              title="클릭해서 이름 수정"
+              title={t("rename")}
               onClick={() => {
                 setRenameValue(currentGraph.name);
                 setRenaming(true);
@@ -331,7 +333,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
           <input
             autoFocus
             className="session-input"
-            placeholder="새 그래프 이름"
+            placeholder={t("newGraphName")}
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => {
@@ -342,77 +344,72 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
           />
         ) : (
           <button className="ghost-btn" onClick={() => setCreating(true)}>
-            ＋ 새 그래프
+            {t("newGraph")}
           </button>
         )}
 
         <span className="toolbar-sep" />
         <button
           className={`ghost-btn ${pickerOpen ? "toolbar-active" : ""} ${!currentGraph ? "toolbar-dim" : ""}`}
-          title={currentGraph ? "열린 항목에서 노드 추가" : "그래프를 먼저 만든 뒤 담을 항목을 고르세요"}
           onClick={() => {
             if (currentGraph) {
               setPickerOpen((v) => !v);
             } else {
               setCreating(true);
-              showToast("먼저 새 그래프를 만들어 주세요 — 이름은 입력한 뒤 담을 항목을 고릅니다");
+              showToast(t("toastNeedGraph"));
             }
           }}
         >
-          ＋ 노드 추가
+          {t("addNode")}
         </button>
         <button
           className={`ghost-btn ${linkMode ? "toolbar-active" : ""} ${!currentGraph ? "toolbar-dim" : ""}`}
-          title={currentGraph ? "노드 두 개를 클릭해 연결" : "직접 만든 그래프에서만 연결할 수 있습니다"}
           onClick={() => {
             if (!currentGraph) {
               setCreating(true);
-              showToast("먼저 새 그래프를 만들어 주세요");
+              showToast(t("toastNeedGraph"));
               return;
             }
             setLinkMode((v) => !v);
             setPendingLink(null);
           }}
         >
-          ⌁ 연결 모드
+            {t("linkMode")}
         </button>
         {currentGraph && (
           <ConfirmButton
-            label="그래프 삭제"
+            label={t("deleteGraph")}
+            confirmLabel={t("confirmDelete")}
             onConfirm={async () => {
               await db.deleteGraph(currentGraph.id);
               setCurrentGraphId(null);
               await loadGraphs();
-              showToast(`그래프 "${currentGraph.name}"를 삭제했습니다`);
+              showToast(t("toastGraphDeleted", { name: currentGraph.name }));
             }}
           />
         )}
       </div>
 
-      <div className="graph-hint">
-        {currentGraph
-          ? linkMode
-            ? pendingLink !== null
-              ? "연결할 두 번째 노드를 클릭하세요 (같은 노드를 다시 클릭하면 취소)"
-              : "노드 두 개를 차례로 클릭하면 연결됩니다 · 파란 연결선 클릭 시 삭제"
-            : "노드 클릭: 상세 보기 · 노드 우클릭: 그래프에서 제거"
-          : "노드는 자동으로 생기지 않습니다 · 그래프를 만들고 ＋ 노드 추가로 담으세요"}
-      </div>
+      {linkMode && currentGraph && (
+        <div className="graph-hint">
+          {pendingLink !== null ? t("secondNode") : t("connectTwo")}
+        </div>
+      )}
 
       {!currentGraph && !creating && (
         <div className="graph-empty">
-          <p>빈 지도입니다. 새 항목은 그래프에 자동으로 올라오지 않습니다.</p>
+          <p>{t("emptyGraph")}</p>
           <button className="primary-btn" onClick={() => setCreating(true)}>
-            ＋ 새 그래프
+            {t("newGraph")}
           </button>
         </div>
       )}
 
       {currentGraph && nodeIds.length === 0 && !pickerOpen && (
         <div className="graph-empty">
-          <p>빈 지도입니다. 담을 항목을 고르세요.</p>
+          <p>{t("emptyGraph")}</p>
           <button className="primary-btn" onClick={() => setPickerOpen(true)}>
-            ＋ 노드 추가
+            {t("addNode")}
           </button>
         </div>
       )}
@@ -420,9 +417,9 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
       {pickerOpen && currentGraph && (
         <aside className="node-picker">
           <div className="node-picker-header">
-            <span>열린 항목에서 노드 추가</span>
+            <span>{t("nodeAdd")}</span>
             <button className="ghost-btn" onClick={() => setPickerOpen(false)}>
-              완료
+              {t("done")}
             </button>
           </div>
           <div className="node-picker-tiers">
@@ -430,7 +427,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
               className={`tier-chip ${pickerTier === "all" ? "active" : ""}`}
               onClick={() => setPickerTier("all")}
             >
-              전체
+              {t("all")}
             </button>
             {TIER_ORDER.map((t) => (
               <button
@@ -445,13 +442,13 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
           </div>
           <input
             className="node-picker-search"
-            placeholder="제목 검색…"
+            placeholder={t("searchTitle")}
             value={pickerQuery}
             onChange={(e) => setPickerQuery(e.target.value)}
           />
           <div className="node-picker-list">
             {pickable.length === 0 && (
-              <div className="column-empty">추가할 수 있는 항목이 없습니다</div>
+              <div className="column-empty">{t("none")}</div>
             )}
             {pickable.map((d) => (
               <button
@@ -476,7 +473,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
         <span><i style={{ background: TIER_META.ram.color }} /> RAM</span>
         <span><i style={{ background: TIER_META.storage.color }} /> Storage</span>
         <span><i style={{ background: TIER_META.inbox.color }} /> Inbox</span>
-        <span><i style={{ background: "rgba(87,171,90,0.5)", border: "1.5px solid #57ab5a" }} /> 탐험 완료</span>
+        <span><i style={{ background: "rgba(87,171,90,0.5)", border: "1.5px solid #57ab5a" }} /> {t("legendResolved")}</span>
       </div>
     </div>
   );

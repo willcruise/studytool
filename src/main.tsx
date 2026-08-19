@@ -2,9 +2,17 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import QuickCapture from "./QuickCapture";
+import DigWidget from "./DigWidget";
+import { LocaleProvider } from "./i18n";
 
-const isQuick = new URLSearchParams(window.location.search).has("quick");
+const params = new URLSearchParams(window.location.search);
+const isQuick = params.has("quick");
+const isDig = params.has("dig");
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>{isQuick ? <QuickCapture /> : <App />}</React.StrictMode>,
+  <React.StrictMode>
+    <LocaleProvider>
+      {isDig ? <DigWidget /> : isQuick ? <QuickCapture /> : <App />}
+    </LocaleProvider>
+  </React.StrictMode>
 );

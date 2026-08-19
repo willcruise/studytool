@@ -2,6 +2,7 @@ import type { Debt } from "./types";
 import * as db from "./db";
 import { getImageSink, ingestImageFile, ingestImagePath, isImagePath } from "./images";
 import { importFile, isPaperPath, titleFromFilename } from "./files";
+import { t } from "./i18n";
 
 export interface IngestCtx {
   selectedId: number | null;
@@ -78,12 +79,12 @@ export async function ingestDroppedPaths(
     bumpAttachments: true,
     toast:
       papers > 0
-        ? `논문 ${papers}개를 출처로 달았습니다`
+        ? t("papersAttached", { n: papers })
         : inserted > 0
-          ? `사진 ${inserted}장을 에디터에 추가했습니다`
+          ? t("photosInEditor", { n: inserted })
           : targetId !== null
-            ? `파일 ${attached}개를 선택된 항목에 첨부했습니다`
-            : `파일 ${paths.length}개를 인박스에 추가했습니다`,
+            ? t("filesAttached", { n: attached })
+            : t("filesInbox", { n: paths.length }),
   };
 }
 
@@ -93,24 +94,24 @@ export async function ingestPastedImage(file: File, ctx: IngestCtx): Promise<Ing
   if (sink && targetId !== null) {
     const stored = await ingestImageFile(targetId, file);
     sink(stored);
-    return { toast: "사진을 에디터에 넣었습니다", refresh: false, bumpAttachments: true };
+    return { toast: t("photoInEditor"), refresh: false, bumpAttachments: true };
   }
   if (targetId !== null) {
     await ingestImageFile(targetId, file);
     return {
-      toast: "이미지를 선택된 항목에 첨부했습니다",
+      toast: t("imageAttached"),
       refresh: true,
       bumpAttachments: true,
     };
   }
   const id = await db.createDebt({
-    title: "붙여넣은 이미지",
+    title: t("pastedImage"),
     tier: "inbox",
     sessionId: ctx.sessionId,
   });
   await ingestImageFile(id, file);
   return {
-    toast: "이미지를 인박스에 추가했습니다",
+    toast: t("imageInbox"),
     refresh: true,
     bumpAttachments: true,
   };

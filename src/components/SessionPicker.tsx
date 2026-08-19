@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import type { Session } from "../types";
 import { ConfirmButton } from "./ConfirmButton";
+import { useI18n } from "../i18n";
 
 interface Props {
   sessions: Session[];
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export function SessionPicker({ sessions, active, onSelect, onCreate, onRename, onDelete }: Props) {
+  const { t } = useI18n();
   const [mode, setMode] = useState<"view" | "create" | "rename">("view");
   const [text, setText] = useState("");
   const skipBlur = useRef(false);
@@ -32,7 +34,7 @@ export function SessionPicker({ sessions, active, onSelect, onCreate, onRename, 
         <input
           autoFocus
           className="session-input"
-          placeholder={mode === "create" ? "지금 공부하는 주제 (예: B+ Tree)" : "세션 이름 변경"}
+          placeholder={mode === "create" ? t("topic") : t("name")}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
@@ -60,13 +62,13 @@ export function SessionPicker({ sessions, active, onSelect, onCreate, onRename, 
 
   return (
     <div className="session-picker">
-      <span className="session-label">세션</span>
+      <span className="session-label">{t("session")}</span>
       <select
         className="session-select"
         value={active?.id ?? ""}
         onChange={(e) => onSelect(e.target.value ? Number(e.target.value) : null)}
       >
-        <option value="">(세션 없음)</option>
+        <option value="">{t("sessionNone")}</option>
         {sessions.map((s) => (
           <option key={s.id} value={s.id}>
             {s.topic}
@@ -79,15 +81,15 @@ export function SessionPicker({ sessions, active, onSelect, onCreate, onRename, 
           setText("");
           setMode("create");
         }}
-        title="새 세션 시작"
+        title={t("newTopic")}
       >
-        ＋ 새 주제
+        {t("newTopic")}
       </button>
       {active && (
         <>
           <button
             className="ghost-btn"
-            title="세션 이름 변경"
+            title={t("rename")}
             onClick={() => {
               setText(active.topic);
               setMode("rename");
@@ -97,9 +99,9 @@ export function SessionPicker({ sessions, active, onSelect, onCreate, onRename, 
           </button>
           <ConfirmButton
             label="－"
-            confirmLabel="삭제?"
+            confirmLabel={t("deleteConfirm")}
             className="ghost-btn session-delete"
-            title="세션 삭제 (연결된 항목은 세션 없음으로 남습니다)"
+            title={t("delete")}
             onConfirm={() => onDelete(active.id)}
           />
         </>

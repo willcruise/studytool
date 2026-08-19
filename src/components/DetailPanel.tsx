@@ -6,7 +6,9 @@ import { basename, openAttachment } from "../files";
 import { relativeAge } from "../time";
 import { ConfirmButton } from "./ConfirmButton";
 import { RichEditor, type RichEditorHandle } from "./RichEditor";
+import { handleTextareaTab } from "../keys";
 import { CHECK_MIN_CHARS, checkIsReady } from "../richtext";
+import { useI18n } from "../i18n";
 
 interface Props {
   debt: Debt;
@@ -58,6 +60,7 @@ export function DetailPanel({
   onSplit,
   onSaveSourceFile,
 }: Props) {
+  const { t } = useI18n();
   const [note, setNote] = useState(debt.note);
   const [check, setCheck] = useState(debt.check_content ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -69,6 +72,7 @@ export function DetailPanel({
   const [noteRev, setNoteRev] = useState(0);
   const [splitTitle, setSplitTitle] = useState("");
   const [splitting, setSplitting] = useState(false);
+  const [showPaths, setShowPaths] = useState(false);
   const noteEditorRef = useRef<RichEditorHandle>(null);
   const noteTimer = useRef<number>(0);
   const checkTimer = useRef<number>(0);
@@ -117,6 +121,7 @@ export function DetailPanel({
     setNoteRev(0);
     setSplitTitle("");
     setSplitting(false);
+    setShowPaths(false);
     origNoteRef.current = debt.note;
     origCheckRef.current = debt.check_content ?? "";
     editingIdRef.current = debt.id;
@@ -202,7 +207,7 @@ export function DetailPanel({
           {meta.label}
         </span>
         <button className="ghost-btn" onClick={close}>
-          닫기 ✕
+          {t("close")}
         </button>
       </div>
 
@@ -214,18 +219,7 @@ export function DetailPanel({
           value={titleValue}
           onChange={(e) => setTitleValue(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Tab" && e.shiftKey) {
-              e.preventDefault();
-              const el = e.currentTarget;
-              const start = el.selectionStart;
-              const end = el.selectionEnd;
-              const next = titleValue.slice(0, start) + "\n" + titleValue.slice(end);
-              setTitleValue(next);
-              requestAnimationFrame(() => {
-                el.selectionStart = el.selectionEnd = start + 1;
-              });
-              return;
-            }
+            if (handleTextareaTab(e, titleValue, setTitleValue)) return;
             if (e.key === "Enter" && e.shiftKey) {
               return;
             }
@@ -241,27 +235,27 @@ export function DetailPanel({
           onBlur={saveTitle}
         />
       ) : (
-        <h2 className="detail-title editable" title="클릭해서 제목 수정" onClick={() => setEditingTitle(true)}>
+        <h2 className="detail-title editable" onClick={() => setEditingTitle(true)}>
           {debt.title} <span className="edit-pencil">✎</span>
         </h2>
       )}
       <div className="detail-sub">
         {relativeAge(debt.created_at)}
-        {debt.time_spent_min > 0 && <span> · 지금까지 {debt.time_spent_min}분 탐색</span>}
+        {debt.time_spent_min > 0 && <span>{t("exploredMins", { n: debt.time_spent_min })}</span>}
       </div>
       {debt.parent_id && debt.parent_title && (
         <button className="parent-chip" onClick={() => onSelectRelated(debt.parent_id!)}>
-          원본 ↳ {debt.parent_title}
+          {t("parent", { title: debt.parent_title })}
         </button>
       )}
 
-      <label className="detail-label">세션</label>
+      <label className="detail-label">{t("session")}</label>
       <select
         className="session-select detail-session"
         value={debt.session_id ?? ""}
         onChange={(e) => onSetSession(debt.id, e.target.value ? Number(e.target.value) : null)}
       >
-        <option value="">(세션 없음)</option>
+        <option value="">{t("sessionNone")}</option>
         {sessions.map((s) => (
           <option key={s.id} value={s.id}>
             {s.topic}
@@ -273,7 +267,7 @@ export function DetailPanel({
         <input
           autoFocus
           className="detail-url-input"
-          placeholder="https:// 출처 링크 (비우면 제거)"
+          placeholder="https://"
           value={urlValue}
           onChange={(e) => setUrlValue(e.target.value)}
           onKeyDown={(e) => {
@@ -290,44 +284,39 @@ export function DetailPanel({
           <a className="detail-link" href={debt.source_url} target="_blank" rel="noreferrer">
             {debt.source_url}
           </a>
-          <button className="edit-pencil-btn" title="링크 수정" onClick={() => setEditingUrl(true)}>
+          <button className="edit-pencil-btn" onClick={() => setEditingUrl(true)}>
             ✎
           </button>
         </div>
       ) : (
         <button className="add-link-btn" onClick={() => setEditingUrl(true)}>
-          ＋ 출처 링크 추가
+          {t("addSourceLink")}
         </button>
       )}
 
       {debt.source_file ? (
         <div className="detail-url-row">
-          <button className="detail-link source-file-btn" onClick={() => openAttachment(debt.source_file!)}>
-            📄 {basename(debt.source_file)}
+          <button className={`detail-link source-file-btn${showPaths ? " show-path" : ""}`} onClick={() => openAttachment(debt.source_file!)}>
+            📄 {showPaths ? debt.source_file : basename(debt.source_file)}
+          </button>
+          <button type="button" className="path-toggle" onClick={() => setShowPaths((v) => !v)}>
+            {showPaths ? t("filename") : t("filepath")}
           </button>
           <button
             className="attachment-remove"
-            title="출처 파일 제거"
             onClick={() => onSaveSourceFile(debt.id, null)}
           >
             ✕
           </button>
         </div>
-      ) : debt.status === "open" ? (
-        <div className="attachment-empty source-file-hint">
-          PDF·논문을 창에 드롭하면 출처 파일이 됩니다
-        </div>
       ) : null}
 
-      <label className="detail-label">메모</label>
+      <label className="detail-label">{t("memo")}</label>
       {writer === "note" && <div className="writer-backdrop" onClick={() => { flush(); setWriter(null); }} />}
       <div className={`editor-dock ${writer === "note" ? "open" : ""}`}>
         {writer === "note" && (
           <header className="writer-header">
-            <div>
-              <h3>메모</h3>
-              <p className="writer-hint">사진은 기존 내용 아래에 추가됩니다. 붙여넣기·드래그·사진 버튼을 쓰면 됩니다.</p>
-            </div>
+            <h3>{t("memo")}</h3>
           </header>
         )}
         <RichEditor
@@ -335,7 +324,7 @@ export function DetailPanel({
           key={`${debt.id}-note-${noteRev}`}
           debtId={debt.id}
           html={note}
-          placeholder="맥락, 스크랩, 다음 질문… 사진도 붙여넣기 하세요"
+          placeholder={t("memo")}
           expanded={writer === "note"}
           onChange={queueNote}
           onExpand={() => setWriter("note")}
@@ -349,16 +338,11 @@ export function DetailPanel({
 
       {debt.status === "open" && (diggingThis || splitting) && (
         <div className={`split-box ${diggingThis ? "hot" : ""}`}>
-          <label className="detail-label">
-            {diggingThis ? "파보는 중 — 갈래로 쪼개기" : "갈래로 쪼개기"}
-          </label>
-          <p className="split-hint">
-            메모에서 줄을 선택한 뒤 만들거나, 제목을 직접 적으세요. Cache에 새 카드가 생기고 원본은 남습니다.
-          </p>
+          <label className="detail-label">{t("split")}</label>
           <div className="split-row">
             <input
               className="detail-url-input"
-              placeholder="새 카드 제목 (또는 메모에서 선택)"
+              placeholder={t("title")}
               value={splitTitle}
               onChange={(e) => setSplitTitle(e.target.value)}
               onKeyDown={(e) => {
@@ -369,50 +353,45 @@ export function DetailPanel({
               }}
             />
             <button className="ghost-btn" onClick={submitSplit}>
-              갈래 만들기
+              {t("makeSplit")}
             </button>
           </div>
         </div>
       )}
       {debt.status === "open" && !diggingThis && !splitting && (
         <button className="add-link-btn" onClick={() => setSplitting(true)}>
-          ＋ 갈래로 쪼개기
+          {t("addSplit")}
         </button>
       )}
 
       {childrenDebts.length > 0 && (
         <div className="child-list">
-          <label className="detail-label">갈래 ({childrenDebts.length})</label>
+          <label className="detail-label">{t("branches", { n: childrenDebts.length })}</label>
           {childrenDebts.map((c) => (
             <button key={c.id} className="child-chip" onClick={() => onSelectRelated(c.id)}>
               <span className="picker-dot" style={{ background: TIER_META[c.tier].color }} />
               {c.title}
               {c.status !== "open" && (
-                <span className="child-status">{c.status === "resolved" ? "완료" : "방출"}</span>
+                <span className="child-status">{c.status === "resolved" ? t("done") : t("evicted")}</span>
               )}
             </button>
           ))}
         </div>
       )}
 
-      <label className="detail-label">
-        Check <span className="label-required">핵심 · 상환 전 필수</span>
-      </label>
+      <label className="detail-label">Check</label>
       {writer === "check" && <div className="writer-backdrop" onClick={() => { flush(); setWriter(null); }} />}
       <div className={`editor-dock ${writer === "check" ? "open" : ""}`}>
         {writer === "check" && (
           <header className="writer-header">
-            <div>
-              <h3>Check — 핵심</h3>
-              <p className="writer-hint">이해한 핵심만. 사진은 기존 글을 지우지 않고 이어서 들어갑니다.</p>
-            </div>
+            <h3>Check</h3>
           </header>
         )}
         <RichEditor
           key={`${debt.id}-check`}
           debtId={debt.id}
           html={check}
-          placeholder="이 개념의 핵심을 내 언어로. 왜 그렇게 동작하는지까지."
+          placeholder="Check"
           expanded={writer === "check"}
           onChange={queueCheck}
           onExpand={() => setWriter("check")}
@@ -424,26 +403,28 @@ export function DetailPanel({
         />
       </div>
       {debt.status === "open" && !checkIsReady(check) && (
-        <div className="resolve-hint">상환하려면 Check를 {CHECK_MIN_CHARS}자 이상 작성하세요</div>
+        <div className="resolve-hint">{t("checkMin", { n: CHECK_MIN_CHARS })}</div>
       )}
 
-      <label className="detail-label">첨부 ({attachments.length})</label>
-      <div className="attachment-list">
-        {attachments.length === 0 && (
-          <div className="attachment-empty">
-            {debt.source_file
-              ? "다른 파일은 여기에 첨부됩니다"
-              : "이 패널이 열린 채 파일을 드롭하세요"}
-          </div>
+      <label className="detail-label">
+        <span>{t("attachments", { n: attachments.length })}</span>
+        {(attachments.length > 0 && !debt.source_file) && (
+          <button type="button" className="path-toggle" onClick={() => setShowPaths((v) => !v)}>
+            {showPaths ? t("filename") : t("filepath")}
+          </button>
         )}
+      </label>
+      <div className="attachment-list">
         {attachments.map((a) => (
           <div key={a.id} className="attachment-row">
-            <button className="attachment-open" onClick={() => openAttachment(a.path)}>
-              {basename(a.filename)}
+            <button
+              className={`attachment-open${showPaths ? " show-path" : ""}`}
+              onClick={() => openAttachment(a.path)}
+            >
+              {showPaths ? a.path : basename(a.filename)}
             </button>
             <button
               className="attachment-remove"
-              title="첨부 제거"
               onClick={async () => {
                 await removeAttachment(a.id);
                 setAttachments(await listAttachments(debt.id));
@@ -457,11 +438,11 @@ export function DetailPanel({
 
       {debt.status === "open" && !digActive && (
         <div className="dig-start">
-          <label className="detail-label">타임박스로 파보기 (끝나면 Check를 요구합니다)</label>
+          <label className="detail-label">{t("dig")}</label>
           <div className="detail-actions">
             {[15, 30, 60].map((m) => (
               <button key={m} className="dig-start-btn" onClick={() => onStartDig(debt.id, m)}>
-                ⛏ {m}분
+                ⛏ {t("minutes", { n: m })}
               </button>
             ))}
           </div>
@@ -473,36 +454,34 @@ export function DetailPanel({
           <button
             className="primary-btn"
             disabled={!checkIsReady(check)}
-            title={checkIsReady(check) ? "Check를 기준으로 상환합니다" : "Check를 먼저 작성하세요"}
             onClick={() => {
               flush();
               onResolve(debt.id, check);
             }}
           >
-            상환하기
+            {t("resolve")}
           </button>
-          <button className="ghost-btn" onClick={() => onEvict(debt.id)} title="GC: 필요 없어진 항목 방출">
-            방출 (GC)
+          <button className="ghost-btn" onClick={() => onEvict(debt.id)}>
+            {t("evict")}
           </button>
-          <ConfirmButton label="삭제" onConfirm={() => onDelete(debt.id)} />
+          <ConfirmButton label={t("delete")} confirmLabel={t("confirmDelete")} onConfirm={() => onDelete(debt.id)} />
         </div>
       )}
 
       {debt.status === "evicted" && (
         <div className="detail-actions">
-          <span className="evicted-note">방출된 항목입니다</span>
+          <span className="evicted-note">{t("evictedNote")}</span>
           <button className="primary-btn" onClick={() => onReopen(debt.id)}>
-            복원
+            {t("restoreItem")}
           </button>
-          <ConfirmButton label="완전 삭제" onConfirm={() => onDelete(debt.id)} />
+          <ConfirmButton label={t("deleteForever")} confirmLabel={t("confirmDelete")} onConfirm={() => onDelete(debt.id)} />
         </div>
       )}
 
       {debt.status === "resolved" && (
         <div className="resolved-box">
-          <p className="resolve-hint">Check가 상환 기록입니다. 위에서 계속 고칠 수 있습니다.</p>
           <button className="ghost-btn" onClick={() => onReopen(debt.id)}>
-            다시 열기
+            {t("reopen")}
           </button>
         </div>
       )}

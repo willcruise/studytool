@@ -42,11 +42,11 @@ export interface Attachment {
   created_at: string;
 }
 
-export const TIER_META: Record<Tier, { label: string; hint: string; color: string }> = {
-  inbox: { label: "Inbox", hint: "일단 던져놓는 곳", color: "#8b8fa3" },
-  cache: { label: "Cache", hint: "지금 진도를 막는 것", color: "#e5534b" },
-  ram: { label: "RAM", hint: "주말·자투리에 볼 것", color: "#d4a72c" },
-  storage: { label: "Storage", hint: "언젠가 파볼 큰 주제", color: "#539bf5" },
+export const TIER_META: Record<Tier, { label: string; color: string }> = {
+  inbox: { label: "Inbox", color: "#8b8fa3" },
+  cache: { label: "Cache", color: "#e5534b" },
+  ram: { label: "RAM", color: "#d4a72c" },
+  storage: { label: "Storage", color: "#539bf5" },
 };
 
 export const TIER_ORDER: Tier[] = ["inbox", "cache", "ram", "storage"];
@@ -59,12 +59,7 @@ export function visibleBoardTiers(showRam: boolean, showStorage: boolean): Tier[
 
 export type View = "board" | "graph" | "review" | "resolved";
 
-export const VIEWS: { key: View; label: string }[] = [
-  { key: "board", label: "보드" },
-  { key: "graph", label: "지도" },
-  { key: "review", label: "리뷰" },
-  { key: "resolved", label: "탐험 완료" },
-];
+export const VIEW_ORDER: View[] = ["board", "graph", "review", "resolved"];
 
 export interface GraphMeta {
   id: number;

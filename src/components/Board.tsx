@@ -1,6 +1,7 @@
 import type { Debt, Tier } from "../types";
 import { TIER_META } from "../types";
 import { DebtCard } from "./DebtCard";
+import { useI18n } from "../i18n";
 
 interface Props {
   debts: Debt[];
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export function Board({ debts, selectedId, visibleTiers, onSelect, onMove }: Props) {
+  const { t } = useI18n();
   return (
     <div className={`board cols-${visibleTiers.length}`}>
       {visibleTiers.map((tier) => {
@@ -21,11 +23,10 @@ export function Board({ debts, selectedId, visibleTiers, onSelect, onMove }: Pro
             <div className="column-header">
               <span className="column-dot" style={{ background: meta.color }} />
               <span className="column-title">{meta.label}</span>
-              <span className="column-hint">{meta.hint}</span>
               <span className="column-count">{items.length}</span>
             </div>
             <div className="column-body">
-              {items.length === 0 && <div className="column-empty">비어 있음</div>}
+              {items.length === 0 && <div className="column-empty">{t("empty")}</div>}
               {items.map((d) => (
                 <DebtCard
                   key={d.id}

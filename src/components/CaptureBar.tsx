@@ -1,6 +1,8 @@
 import { forwardRef, useState } from "react";
 import type { Tier } from "../types";
 import { TIER_META, TIER_ORDER } from "../types";
+import { handleTextareaTab } from "../keys";
+import { useI18n } from "../i18n";
 
 interface Props {
   onCapture: (title: string, tier: Tier, sourceUrl: string | null, note: string) => void;
@@ -45,6 +47,7 @@ export const CaptureBar = forwardRef<HTMLTextAreaElement, Props>(function Captur
   },
   ref
 ) {
+  const { t } = useI18n();
   const [value, setValue] = useState("");
 
   const submit = () => {
@@ -60,10 +63,11 @@ export const CaptureBar = forwardRef<HTMLTextAreaElement, Props>(function Captur
         ref={ref}
         rows={Math.min(6, Math.max(1, value.split("\n").length))}
         className="capture-input"
-        placeholder="지금 걸리는 것… (Enter 저장 · Shift+Enter 줄바꿈)"
+        placeholder={t("capturePlaceholder")}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
+          if (handleTextareaTab(e, value, setValue)) return;
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
             submit();
@@ -72,7 +76,7 @@ export const CaptureBar = forwardRef<HTMLTextAreaElement, Props>(function Captur
       />
       <input
         className="board-search"
-        placeholder="보드에서 찾기"
+        placeholder={t("search")}
         value={query}
         onChange={(e) => onQuery(e.target.value)}
       />
@@ -80,19 +84,12 @@ export const CaptureBar = forwardRef<HTMLTextAreaElement, Props>(function Captur
         {TIER_ORDER.map((t) => {
           const on =
             t === "ram" ? extraTiers.ram : t === "storage" ? extraTiers.storage : captureTier === t;
-          const title =
-            t === "ram" || t === "storage"
-              ? on
-                ? `${TIER_META[t].hint} · 다시 누르면 열을 숨깁니다`
-                : `${TIER_META[t].hint} · 누르면 열을 엽니다`
-              : TIER_META[t].hint;
           return (
             <button
               key={t}
               className={`tier-chip ${on ? "active" : ""}`}
               style={on ? { borderColor: TIER_META[t].color, color: TIER_META[t].color } : {}}
               onClick={() => onSelectTier(t)}
-              title={title}
             >
               {TIER_META[t].label}
             </button>
@@ -102,9 +99,8 @@ export const CaptureBar = forwardRef<HTMLTextAreaElement, Props>(function Captur
           <button
             className={`filter-chip ${sessionOnly ? "active" : ""}`}
             onClick={onToggleSession}
-            title={sessionOnly ? "지금 세션 항목만 보드에 표시 중" : "모든 세션을 표시 중"}
           >
-            {sessionOnly ? `이 세션만` : "모든 세션"}
+            {sessionOnly ? t("thisSession") : t("allSessions")}
           </button>
         )}
       </div>

@@ -18,7 +18,9 @@
         "height": 820,
         "minWidth": 900,
         "minHeight": 600,
-        "dragDropEnabled": true
+        "dragDropEnabled": true,
+        "backgroundColor": "#0e1116",
+        "theme": "Dark"
       },
       {
         "label": "quick",
@@ -31,7 +33,24 @@
         "alwaysOnTop": true,
         "center": true,
         "decorations": false,
-        "skipTaskbar": true
+        "skipTaskbar": true,
+        "backgroundColor": "#161b22",
+        "theme": "Dark"
+      },
+      {
+        "label": "dig",
+        "title": "Dig",
+        "url": "index.html?dig",
+        "width": 340,
+        "height": 72,
+        "resizable": false,
+        "visible": false,
+        "focus": false,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "skipTaskbar": true,
+        "backgroundColor": "#161b22",
+        "theme": "Dark"
       }
     ],
     "security": {

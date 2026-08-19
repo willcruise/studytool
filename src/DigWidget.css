@@ -1,0 +1,112 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: #161b22;
+  overflow: hidden;
+  font-family: "Pretendard", "Apple SD Gothic Neo", -apple-system, "Segoe UI",
+    sans-serif;
+}
+
+.dig-widget {
+  box-sizing: border-box;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #161b22;
+  border: 1px solid rgba(212, 167, 44, 0.45);
+  border-radius: 12px;
+  color: #e6e9ef;
+  user-select: none;
+}
+
+.dig-widget.empty {
+  color: #8b93a1;
+  font-size: 12px;
+}
+
+.dig-widget-drag {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: move;
+}
+
+.dig-widget-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.dig-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d4a72c;
+  flex-shrink: 0;
+  animation: dig-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes dig-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.dig-label {
+  color: #d4a72c;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.dig-widget .dig-title {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+  display: block;
+}
+
+.dig-widget .dig-timer {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 18px;
+  font-weight: 700;
+  color: #d4a72c;
+  flex-shrink: 0;
+}
+
+.dig-widget-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.dig-widget-actions .ghost-btn {
+  background: transparent;
+  border: 1px solid #2b313b;
+  color: #8b93a1;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.dig-widget-actions .ghost-btn:hover {
+  color: #e6e9ef;
+  border-color: #8b93a1;
+}

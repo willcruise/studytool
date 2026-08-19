@@ -282,7 +282,14 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            paint_dark_windows(app.handle());
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             import_file,
@@ -290,6 +297,32 @@ pub fn run() {
             export_backup,
             import_backup
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                show_main_window(app);
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+        });
+}
+
+fn paint_dark_windows(app: &tauri::AppHandle) {
+    let dark = tauri::window::Color(0x0e, 0x11, 0x16, 255);
+    for label in ["main", "quick", "dig"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.set_background_color(Some(dark));
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }

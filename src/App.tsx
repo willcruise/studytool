@@ -3,14 +3,14 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import type { Debt, GraphEdge, Session, Stats, Tier, View } from "./types";
-import { VIEWS, visibleBoardTiers } from "./types";
+import { VIEW_ORDER, visibleBoardTiers } from "./types";
 import * as db from "./db";
 import { checkExcerpt, checkIsReady, matchesQuery } from "./richtext";
-import { getImageSink } from "./images";
 import { exportBackup, importBackup } from "./backup";
 import { ingestDroppedPaths, ingestPastedImage, pasteTargetIsEditor } from "./ingest";
 import { notify } from "./notify";
 import { minutesBetween, parseUtc } from "./time";
+import { LOCALES, VIEW_MSG, useI18n } from "./i18n";
 import { CaptureBar } from "./components/CaptureBar";
 import { SessionPicker } from "./components/SessionPicker";
 import { Board } from "./components/Board";
@@ -21,9 +21,11 @@ import { ReviewPanel } from "./components/ReviewPanel";
 import { ArchivePanel } from "./components/ArchivePanel";
 import { ConfirmButton } from "./components/ConfirmButton";
 import { MoreMenu } from "./components/MoreMenu";
+import { digFloatEnabled, setDigFloatEnabled, setDigWindowVisible } from "./digFloat";
 import "./App.css";
 
 export default function App() {
+  const { t, locale, setLocale } = useI18n();
   const [allDebts, setAllDebts] = useState<Debt[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
@@ -44,6 +46,8 @@ export default function App() {
   const [showStorage, setShowStorage] = useState(false);
   const [captureTier, setCaptureTier] = useState<Tier>("inbox");
   const [graphEdges, setGraphEdges] = useState<GraphEdge[]>([]);
+  const [digFloat, setDigFloatState] = useState(() => digFloatEnabled());
+  const [digWindowOn, setDigWindowOn] = useState(false);
   const digNotifiedRef = useRef(false);
   const toastTimer = useRef<number | null>(null);
 
@@ -53,6 +57,11 @@ export default function App() {
   selectedIdRef.current = selectedId;
   activeSessionRef.current = activeSession;
   allDebtsRef.current = allDebts;
+
+  const setDigFloat = (on: boolean) => {
+    setDigFloatEnabled(on);
+    setDigFloatState(on);
+  };
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -152,12 +161,40 @@ export default function App() {
   useEffect(() => {
     if (digExpired && activeDig && !digNotifiedRef.current) {
       digNotifiedRef.current = true;
-      notify("타임박스 종료", `"${activeDig.title}" — Check를 작성하고 메인 학습으로 복귀하세요`);
+      notify(t("timeboxEnded"), activeDig.title);
       getCurrentWindow().show();
       getCurrentWindow().setFocus();
     }
     if (!digExpired) digNotifiedRef.current = false;
   }, [digExpired, activeDig?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const want = Boolean(activeDig && !digModalOpen && digFloat);
+    void setDigWindowVisible(want).then((ok) => {
+      if (!cancelled) setDigWindowOn(want && ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDig?.id, digModalOpen, digFloat]);
+
+  useEffect(() => {
+    const unFinish = listen("dig-finish-early", () => {
+      setDigFinishRequested(true);
+      const main = getCurrentWindow();
+      void main.show().then(() => main.setFocus());
+    });
+    const unDock = listen("dig-dock", () => {
+      setDigFloatEnabled(false);
+      setDigFloatState(false);
+      void setDigWindowVisible(false).then(() => setDigWindowOn(false));
+    });
+    return () => {
+      unFinish.then((fn) => fn());
+      unDock.then((fn) => fn());
+    };
+  }, []);
 
   const startDig = async (id: number, minutes: number) => {
     await db.startDig(id, minutes);
@@ -165,7 +202,7 @@ export default function App() {
     setPauseDigModal(false);
     setNow(Date.now());
     await refresh();
-    showToast(`${minutes}분 타임박스 시작 — 알람이 울리면 정리하고 복귀합니다`);
+    showToast(t("toastDigStart", { n: minutes }));
   };
 
   const settleDig = async (id: number) => {
@@ -202,7 +239,7 @@ export default function App() {
       setSelectedId(activeDig.id);
       setForceWriter("check");
       setPauseDigModal(true);
-      showToast("상환하려면 핵심 Check를 먼저 작성하세요");
+      showToast(t("toastNeedCheck"));
       return;
     }
     await db.endDig(activeDig.id, digMinutesSpent);
@@ -210,7 +247,7 @@ export default function App() {
     setDigFinishRequested(false);
     setPauseDigModal(false);
     await refresh();
-    showToast("상환 완료 — 지도의 한 영역을 밝혔습니다");
+    showToast(t("toastResolved"));
   };
 
   // ---------- capture ----------
@@ -280,7 +317,7 @@ export default function App() {
         try {
           await applyIngest(await ingestDroppedPaths(event.payload.paths, ingestCtx()));
         } catch (e) {
-          showToast(`파일 저장 실패: ${e}`);
+          showToast(t("toastFileFail", { error: String(e) }));
         }
       }
     });
@@ -319,7 +356,7 @@ export default function App() {
     await db.evictDebt(id);
     if (selectedId === id) setSelectedId(null);
     await refresh();
-    showToast("방출했습니다 — 진짜 중요하면 다시 마주치게 됩니다");
+    showToast(t("toastEvicted"));
   };
 
   return (
@@ -346,67 +383,94 @@ export default function App() {
           onDelete={async (id) => {
             await db.deleteSession(id);
             await refresh();
-            showToast("세션을 삭제했습니다 — 연결됐던 항목은 남아 있습니다");
+            showToast(t("toastSessionDeleted"));
           }}
         />
         <div className="header-right">
-          <div className="stats" title="갚아야 할 빚이 아니라, 탐험할 지도입니다">
-            <span className="stat-explored">탐험 완료 {stats.resolved}</span>
+          <div className="stats">
+            <span className="stat-explored">{t("statRepaid", { n: stats.resolved })}</span>
             <span className="stat-sep">·</span>
-            <span className="stat-unexplored">미탐험 {stats.open}</span>
+            <span className="stat-unexplored">{t("statOpen", { n: stats.open })}</span>
           </div>
           <div className="view-toggle">
-            {VIEWS.map((v) => (
+            {VIEW_ORDER.map((key) => (
               <button
-                key={v.key}
-                className={view === v.key ? "active" : ""}
-                onClick={() => setView(v.key)}
+                key={key}
+                className={view === key ? "active" : ""}
+                onClick={() => setView(key)}
               >
-                {v.key === "review" && dueChecks.length > 0
-                  ? `리뷰 ${dueChecks.length}`
-                  : v.label}
+                {key === "review" && dueChecks.length > 0
+                  ? t("reviewCount", { n: dueChecks.length })
+                  : t(VIEW_MSG[key])}
               </button>
             ))}
           </div>
-          <MoreMenu>
+          <MoreMenu title={t("more")}>
             <button
               type="button"
               className="more-menu-item"
               role="menuitem"
-              title="데이터베이스와 첨부를 zip으로 저장"
               onClick={async () => {
                 try {
-                  if (await exportBackup()) showToast("백업을 저장했습니다");
+                  if (await exportBackup()) showToast(t("toastBackupSaved"));
                 } catch (e) {
-                  showToast(`백업 실패: ${e}`);
+                  showToast(t("toastBackupFailed", { error: String(e) }));
                 }
               }}
             >
-              백업
+              {t("backup")}
             </button>
             <ConfirmButton
-              label="복원"
-              confirmLabel="덮어쓸까요?"
+              label={t("restore")}
+              confirmLabel={t("restoreConfirm")}
               className="more-menu-item"
-              title="백업 zip으로 현재 데이터를 덮어씁니다"
               onConfirm={async () => {
                 try {
                   const ok = await importBackup();
                   if (ok) {
-                    showToast("복원했습니다. 다시 불러옵니다");
+                    showToast(t("toastRestoreOk"));
                     window.setTimeout(() => window.location.reload(), 500);
                   }
                 } catch (e) {
-                  showToast(`복원 실패: ${e}`);
+                  showToast(t("toastRestoreFailed", { error: String(e) }));
                 }
               }}
             />
+            <div className="more-menu-sep" />
+            <button
+              type="button"
+              className="more-menu-item"
+              role="menuitem"
+              aria-pressed={digFloat}
+              onClick={() => setDigFloat(!digFloat)}
+            >
+              {digFloat ? t("dockTimer") : t("floatTimer")}
+            </button>
+            <div className="more-menu-sep" />
+            <div className="more-menu-label">{t("language")}</div>
+            <div className="more-menu-langs">
+              {LOCALES.map((l) => (
+                <button
+                  key={l.id}
+                  type="button"
+                  className={`more-menu-lang${locale === l.id ? " active" : ""}`}
+                  onClick={() => setLocale(l.id)}
+                >
+                  {l.native}
+                </button>
+              ))}
+            </div>
           </MoreMenu>
         </div>
       </header>
 
-      {activeDig && !digModalOpen && (
-        <DigBar debt={activeDig} now={now} onFinishEarly={() => setDigFinishRequested(true)} />
+      {activeDig && !digModalOpen && !digWindowOn && (
+        <DigBar
+          debt={activeDig}
+          now={now}
+          onFinishEarly={() => setDigFinishRequested(true)}
+          onFloat={() => setDigFloat(true)}
+        />
       )}
 
       {view === "board" && (
@@ -465,22 +529,18 @@ export default function App() {
               }
               setSelectedId(null);
               await refresh();
-              showToast(`${ids.length}개 항목을 방출했습니다`);
+              showToast(t("toastEvictedMany", { n: ids.length }));
             }}
             onStillHolds={async (id) => {
               const result = await db.advanceReview(id);
               await refresh();
-              showToast(
-                result === "done"
-                  ? "이 Check는 지도에 남았습니다"
-                  : "다음에 다시 만납니다"
-              );
+              showToast(result === "done" ? t("toastReviewDone") : t("toastReviewNext"));
             }}
             onReopen={async (id) => {
               await db.reopenDebt(id);
               setSelectedId(id);
               await refresh();
-              showToast("다시 열었습니다");
+              showToast(t("toastReopened"));
             }}
           />
         )}
@@ -518,7 +578,7 @@ export default function App() {
                 parentId,
               });
               await refresh();
-              showToast("Cache에 갈래를 만들었습니다");
+              showToast(t("toastSplit"));
             }}
             onSaveSourceFile={async (id, path) => {
               await db.updateDebt(id, { source_file: path });
@@ -553,11 +613,11 @@ export default function App() {
             onResolve={async (id, checkHtml) => {
               await db.updateDebt(id, { check_content: checkHtml });
               await settleDig(id);
-              await db.resolveDebt(id, checkExcerpt(checkHtml) || "핵심 Check");
+              await db.resolveDebt(id, checkExcerpt(checkHtml) || t("checkFallback"));
               setDigFinishRequested(false);
               setPauseDigModal(false);
               await refresh();
-              showToast("상환 완료 — 지도의 한 영역을 밝혔습니다");
+              showToast(t("toastResolved"));
             }}
             onReopen={async (id) => {
               await db.reopenDebt(id);
@@ -584,7 +644,7 @@ export default function App() {
             setSelectedId(activeDig.id);
             setForceWriter("check");
             setPauseDigModal(true);
-            showToast("Check를 작성한 뒤 상환하기를 누르세요");
+            showToast(t("toastWriteCheck"));
           }}
           onReturn={closeDig}
         />
@@ -593,11 +653,7 @@ export default function App() {
       {dropActive && (
         <div className="drop-overlay">
           <div className="drop-overlay-text">
-            {selectedId !== null
-              ? getImageSink()
-                ? "놓으면 에디터에 사진이 들어갑니다 (PDF는 출처, 다른 파일은 첨부)"
-                : "놓으면 선택된 항목에 붙습니다 (PDF는 출처 파일)"
-              : "놓으면 인박스에 추가됩니다 (PDF는 출처가 있는 항목으로)"}
+            {selectedId !== null ? t("dropHere") : t("dropInbox")}
           </div>
         </div>
       )}

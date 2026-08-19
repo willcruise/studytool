@@ -4,9 +4,12 @@ import { emit, listen } from "@tauri-apps/api/event";
 import * as db from "./db";
 import type { Session } from "./types";
 import { parseInput } from "./components/CaptureBar";
+import { handleTextareaTab } from "./keys";
+import { useI18n } from "./i18n";
 import "./QuickCapture.css";
 
 export default function QuickCapture() {
+  const { t } = useI18n();
   const [value, setValue] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [saved, setSaved] = useState(false);
@@ -60,10 +63,11 @@ export default function QuickCapture() {
           autoFocus
           rows={Math.min(4, Math.max(2, value.split("\n").length))}
           className="quick-input"
-          placeholder="궁금한 것을 던지고 Enter — Shift+Enter 줄바꿈"
+          placeholder={t("capture")}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
+            if (handleTextareaTab(e, value, setValue)) return;
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               submit();
@@ -74,11 +78,10 @@ export default function QuickCapture() {
       </div>
       <div className="quick-footer">
         {saved ? (
-          <span className="quick-saved">저장됨 ✓</span>
+          <span className="quick-saved">{t("saved")}</span>
         ) : (
           <>
-            <span>{session ? `◈ ${session.topic} 세션에 연결됨` : "세션 없음"}</span>
-            <span className="quick-keys">Enter 저장 · Shift+Enter 줄바꿈 · Esc 닫기</span>
+            <span>{session ? `◈ ${session.topic}` : t("noSession")}</span>
           </>
         )}
       </div>

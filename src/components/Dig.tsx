@@ -2,6 +2,8 @@ import { useState } from "react";
 import type { Debt } from "../types";
 import { checkIsReady } from "../richtext";
 import { parseUtc } from "../time";
+import { handleTextareaTab } from "../keys";
+import { useI18n } from "../i18n";
 
 function fmt(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));
@@ -16,18 +18,34 @@ interface BarProps {
   debt: Debt;
   now: number;
   onFinishEarly: () => void;
+  onFloat: () => void;
 }
 
-export function DigBar({ debt, now, onFinishEarly }: BarProps) {
+export function DigBar({ debt, now, onFinishEarly, onFloat }: BarProps) {
   const remaining = parseUtc(debt.dig_until!) - now;
+  const { t } = useI18n();
   return (
     <div className="dig-bar">
       <span className="dig-pulse" />
-      <span className="dig-label">파보는 중</span>
+      <span className="dig-label">{t("digging")}</span>
       <span className="dig-title">{debt.title}</span>
       <span className="dig-timer">{fmt(remaining)}</span>
+      <button
+        type="button"
+        className="ghost-btn"
+        title={t("floatTimer")}
+        aria-label={t("floatTimer")}
+        onClick={onFloat}
+      >
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M6 2h8v8h-2V5.4L5.4 12 4 10.6 10.6 4H6V2zM2 6h2v8h8v2H2V6z"
+          />
+        </svg>
+      </button>
       <button className="ghost-btn" onClick={onFinishEarly}>
-        지금 끝내기
+        {t("finishNow")}
       </button>
     </div>
   );
@@ -52,6 +70,7 @@ export function DigEndModal({
   onNeedCheck,
   onReturn,
 }: ModalProps) {
+  const { t } = useI18n();
   const [mode, setMode] = useState<"choose" | "return">("choose");
   const [text, setText] = useState("");
 
@@ -59,12 +78,9 @@ export function DigEndModal({
     <div className="modal-backdrop">
       <div className="modal">
         <h3 className="modal-title">
-          {expired ? "⏰ 타임박스 종료" : "파보기 마무리"} — {debt.title}
+          {expired ? t("timeboxEnded") : t("digWrapup")} — {debt.title}
         </h3>
-        <p className="modal-sub">
-          {minutesSpent}분 탐색했습니다. 여기서 멈추고 정리해야 메인 학습으로 돌아갈 수
-          있습니다.
-        </p>
+        <p className="modal-sub">{t("minutes", { n: minutesSpent })}</p>
 
         {mode === "choose" && (
           <div className="modal-choices">
@@ -75,10 +91,10 @@ export function DigEndModal({
                 else onNeedCheck();
               }}
             >
-              이해했다 — Check 확인하고 상환
+              {t("understoodResolve")}
             </button>
             <button className="ghost-btn" onClick={() => setMode("return")}>
-              아직이다 — 여기까지 기록하고 복귀
+              {t("notYetReturn")}
             </button>
           </div>
         )}
@@ -88,16 +104,17 @@ export function DigEndModal({
             <textarea
               autoFocus
               className="detail-note"
-              placeholder="여기까지 이해한 것 (비워도 됩니다) — 메모에 기록됩니다"
+              placeholder={t("memoOptional")}
               value={text}
               onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => handleTextareaTab(e, text, setText)}
             />
             <div className="detail-actions">
               <button className="primary-btn" onClick={() => onReturn(text.trim())}>
-                메인 학습으로 복귀
+                {t("returnToStudy")}
               </button>
               <button className="ghost-btn" onClick={() => setMode("choose")}>
-                뒤로
+                {t("back")}
               </button>
             </div>
           </>

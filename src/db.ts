@@ -2,6 +2,7 @@ import Database from "@tauri-apps/plugin-sql";
 import type { Attachment, Debt, GraphEdge, GraphMeta, Session, Stats, Tier } from "./types";
 import { escapeHtml, toEditorHtml } from "./richtext";
 import { minutesBetween } from "./time";
+import { t } from "./i18n";
 
 let db: Database | null = null;
 
@@ -70,6 +71,14 @@ const DEBT_SELECT = `
 export async function listAllDebts(): Promise<Debt[]> {
   const d = await getDb();
   return d.select<Debt[]>(`${DEBT_SELECT} ORDER BY d.created_at DESC`);
+}
+
+export async function getActiveDig(): Promise<Debt | null> {
+  const d = await getDb();
+  const rows = await d.select<Debt[]>(
+    `${DEBT_SELECT} WHERE d.dig_until IS NOT NULL LIMIT 1`
+  );
+  return rows[0] ?? null;
 }
 
 export async function createDebt(input: {
@@ -243,7 +252,7 @@ export async function appendNoteLog(id: number, text: string): Promise<void> {
   const d = await getDb();
   const stamp = new Date().toISOString().slice(0, 10);
   const escaped = escapeHtml(trimmed);
-  const html = `<p>[${stamp} 파보기] ${escaped}</p>`;
+  const html = `<p>[${stamp} ${t("digLog")}] ${escaped}</p>`;
   await d.execute(
     `UPDATE debts SET note = CASE WHEN note = '' THEN $1 ELSE note || $1 END,
      last_touched = datetime('now') WHERE id = $2`,

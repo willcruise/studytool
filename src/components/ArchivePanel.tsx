@@ -1,5 +1,6 @@
 import type { Debt } from "../types";
 import { checkExcerpt, htmlToText } from "../richtext";
+import { useI18n } from "../i18n";
 
 interface Props {
   items: Debt[];
@@ -24,6 +25,7 @@ export function ArchivePanel({
   onQuery,
   onSelect,
 }: Props) {
+  const { t } = useI18n();
   return (
     <div className="archive-wrap">
       <div className="archive-toolbar">
@@ -32,28 +34,24 @@ export function ArchivePanel({
             className={filter === "resolved" ? "active" : ""}
             onClick={() => onFilter("resolved")}
           >
-            탐험 완료 {resolvedCount}
+            {t("viewResolved")} {resolvedCount}
           </button>
           <button
             className={filter === "evicted" ? "active" : ""}
             onClick={() => onFilter("evicted")}
           >
-            방출됨 {evictedCount}
+            {t("evictedTab", { n: evictedCount })}
           </button>
         </div>
         <input
           className="board-search"
-          placeholder="보관함에서 찾기"
+          placeholder={t("search")}
           value={query}
           onChange={(e) => onQuery(e.target.value)}
         />
       </div>
       <div className="resolved-list">
-        {items.length === 0 && (
-          <div className="column-empty">
-            {filter === "resolved" ? "아직 탐험 완료한 영역이 없습니다" : "방출된 항목이 없습니다"}
-          </div>
-        )}
+        {items.length === 0 && <div className="column-empty">{t("none")}</div>}
         {items.map((d) => (
           <div
             key={d.id}
@@ -64,7 +62,7 @@ export function ArchivePanel({
             <div className="resolved-item-summary">
               {filter === "resolved"
                 ? d.summary || checkExcerpt(d.check_content)
-                : htmlToText(d.note) || "(메모 없음)"}
+                : htmlToText(d.note) || "—"}
             </div>
             {d.session_topic && <div className="debt-session">◈ {d.session_topic}</div>}
           </div>

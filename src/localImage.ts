@@ -5,9 +5,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 export const LocalImage = Image.extend({
   addAttributes() {
     return {
-      src: { default: null },
-      alt: { default: null },
-      title: { default: null },
+      ...this.parent?.(),
       path: {
         default: null,
         parseHTML: (el: HTMLElement) => el.getAttribute("data-path"),

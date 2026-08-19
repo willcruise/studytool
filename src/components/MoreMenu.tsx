@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { useI18n } from "../i18n";
+
 interface Props {
   children: ReactNode;
   title?: string;
 }
 
 /** Quiet overflow toggle for infrequent actions. Add more items as children. */
-export function MoreMenu({ children, title = "더보기" }: Props) {
+export function MoreMenu({ children, title }: Props) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -31,7 +34,7 @@ export function MoreMenu({ children, title = "더보기" }: Props) {
       <button
         type="button"
         className={`more-menu-trigger${open ? " open" : ""}`}
-        title={title}
+        title={title ?? t("more")}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
