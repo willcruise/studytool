@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen } from "@tauri-apps/api/event";
 import * as db from "./db";
 import type { Session } from "./types";
-import { parseInput } from "./components/CaptureBar";
-import { handleTextareaTab } from "./keys";
+import { parseInput } from "./domain/capture";
+import { autosizeTextarea, handleTextareaTab } from "./keys";
 import { useI18n } from "./i18n";
 import "./QuickCapture.css";
 
@@ -21,6 +21,10 @@ export default function QuickCapture() {
     setSaved(false);
     inputRef.current?.focus();
   };
+
+  useLayoutEffect(() => {
+    autosizeTextarea(inputRef.current, 96);
+  }, [value]);
 
   useEffect(() => {
     reload();
@@ -61,13 +65,17 @@ export default function QuickCapture() {
         <textarea
           ref={inputRef}
           autoFocus
-          rows={Math.min(4, Math.max(2, value.split("\n").length))}
+          rows={1}
           className="quick-input"
           placeholder={t("capture")}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
             if (handleTextareaTab(e, value, setValue)) return;
+            if (e.key === "Enter" && e.shiftKey) {
+              e.stopPropagation();
+              return;
+            }
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               submit();

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Attachment, Debt, Session } from "../types";
 import { TIER_META } from "../types";
 import { listAttachments, removeAttachment } from "../db";
@@ -6,7 +6,7 @@ import { basename, openAttachment } from "../files";
 import { relativeAge } from "../time";
 import { ConfirmButton } from "./ConfirmButton";
 import { RichEditor, type RichEditorHandle } from "./RichEditor";
-import { handleTextareaTab } from "../keys";
+import { autosizeTextarea, handleTextareaTab } from "../keys";
 import { CHECK_MIN_CHARS, checkIsReady } from "../richtext";
 import { useI18n } from "../i18n";
 
@@ -73,6 +73,7 @@ export function DetailPanel({
   const [splitTitle, setSplitTitle] = useState("");
   const [splitting, setSplitting] = useState(false);
   const [showPaths, setShowPaths] = useState(false);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
   const noteEditorRef = useRef<RichEditorHandle>(null);
   const noteTimer = useRef<number>(0);
   const checkTimer = useRef<number>(0);
@@ -83,7 +84,6 @@ export function DetailPanel({
   const editingIdRef = useRef(debt.id);
   const onSaveNoteRef = useRef(onSaveNote);
   const onSaveCheckRef = useRef(onSaveCheck);
-  const idAtNoteRef = useRef(debt.id);
   noteRef.current = note;
   checkRef.current = check;
   onSaveNoteRef.current = onSaveNote;
@@ -94,6 +94,10 @@ export function DetailPanel({
     window.clearTimeout(checkTimer.current);
     noteTimer.current = 0;
     checkTimer.current = 0;
+    if (id !== editingIdRef.current) {
+      console.warn("[DetailPanel] skip flush; editor", editingIdRef.current, "target", id);
+      return;
+    }
     if (noteRef.current !== origNoteRef.current) {
       onSaveNoteRef.current(id, noteRef.current);
       origNoteRef.current = noteRef.current;
@@ -105,8 +109,9 @@ export function DetailPanel({
   };
 
   useEffect(() => {
+    const id = debt.id;
     return () => {
-      flushNow(editingIdRef.current);
+      flushNow(id);
     };
   }, [debt.id]);
 
@@ -128,9 +133,9 @@ export function DetailPanel({
   }, [debt.id]);
 
   useEffect(() => {
-    const sameItem = idAtNoteRef.current === debt.id;
-    idAtNoteRef.current = debt.id;
-    if (!sameItem || noteTimer.current) return;
+    if (debt.id !== editingIdRef.current) return;
+    if (noteTimer.current) return;
+    if (noteRef.current !== origNoteRef.current) return;
     if (debt.note !== noteRef.current) {
       setNote(debt.note);
       origNoteRef.current = debt.note;
@@ -139,27 +144,54 @@ export function DetailPanel({
   }, [debt.note, debt.id]);
 
   useEffect(() => {
+    if (debt.id !== editingIdRef.current) return;
+    if (checkTimer.current) return;
+    if (checkRef.current !== origCheckRef.current) return;
+    const next = debt.check_content ?? "";
+    if (next !== checkRef.current) {
+      setCheck(next);
+      origCheckRef.current = next;
+    }
+  }, [debt.check_content, debt.id]);
+
+  useEffect(() => {
     if (forceWriter) {
       setWriter(forceWriter);
       onForceWriterHandled?.();
     }
   }, [forceWriter]);
 
+  useLayoutEffect(() => {
+    if (editingTitle) autosizeTextarea(titleRef.current, 160);
+  }, [editingTitle, titleValue]);
+
   const queueNote = (html: string) => {
+    const id = debt.id;
+    if (id !== editingIdRef.current) {
+      console.warn("[DetailPanel] skip memo from stale editor", id, "active", editingIdRef.current);
+      return;
+    }
     setNote(html);
     window.clearTimeout(noteTimer.current);
     noteTimer.current = window.setTimeout(() => {
-      onSaveNote(debt.id, html);
+      if (editingIdRef.current !== id) return;
+      onSaveNoteRef.current(id, html);
       origNoteRef.current = html;
       noteTimer.current = 0;
     }, 450);
   };
 
   const queueCheck = (html: string) => {
+    const id = debt.id;
+    if (id !== editingIdRef.current) {
+      console.warn("[DetailPanel] skip check from stale editor", id, "active", editingIdRef.current);
+      return;
+    }
     setCheck(html);
     window.clearTimeout(checkTimer.current);
     checkTimer.current = window.setTimeout(() => {
-      onSaveCheck(debt.id, html);
+      if (editingIdRef.current !== id) return;
+      onSaveCheckRef.current(id, html);
       origCheckRef.current = html;
       checkTimer.current = 0;
     }, 450);
@@ -183,7 +215,7 @@ export function DetailPanel({
   };
 
   const saveTitle = () => {
-    const t = titleValue.trim();
+    const t = titleValue.replace(/\s+/g, " ").trim();
     if (t && t !== debt.title) onSaveTitle(debt.id, t);
     setEditingTitle(false);
   };
@@ -199,6 +231,9 @@ export function DetailPanel({
   }, [debt.id, attachmentsVersion]);
 
   const meta = TIER_META[debt.tier];
+  const editorLive = debt.id === editingIdRef.current;
+  const noteForEditor = editorLive ? note : debt.note;
+  const checkForEditor = editorLive ? check : (debt.check_content ?? "");
 
   return (
     <aside className="detail-panel">
@@ -213,14 +248,16 @@ export function DetailPanel({
 
       {editingTitle ? (
         <textarea
+          ref={titleRef}
           autoFocus
-          rows={Math.min(6, Math.max(1, titleValue.split("\n").length))}
+          rows={1}
           className="detail-title-input"
           value={titleValue}
           onChange={(e) => setTitleValue(e.target.value)}
           onKeyDown={(e) => {
             if (handleTextareaTab(e, titleValue, setTitleValue)) return;
             if (e.key === "Enter" && e.shiftKey) {
+              e.stopPropagation();
               return;
             }
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -323,7 +360,7 @@ export function DetailPanel({
           ref={noteEditorRef}
           key={`${debt.id}-note-${noteRev}`}
           debtId={debt.id}
-          html={note}
+          html={noteForEditor}
           placeholder={t("memo")}
           expanded={writer === "note"}
           onChange={queueNote}
@@ -390,7 +427,7 @@ export function DetailPanel({
         <RichEditor
           key={`${debt.id}-check`}
           debtId={debt.id}
-          html={check}
+          html={checkForEditor}
           placeholder="Check"
           expanded={writer === "check"}
           onChange={queueCheck}

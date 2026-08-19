@@ -23,3 +23,10 @@ export function relativeAge(sqliteUtc: string, now = Date.now()): string {
 export function daysSince(sqliteUtc: string, now = Date.now()): number {
   return (now - parseUtc(sqliteUtc)) / 86_400_000;
 }
+
+export function fmtCountdown(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}

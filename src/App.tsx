@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { listen } from "@tauri-apps/api/event";
-import type { Debt, GraphEdge, Session, Stats, Tier, View } from "./types";
-import { VIEW_ORDER, visibleBoardTiers } from "./types";
-import * as db from "./db";
-import { checkExcerpt, checkIsReady, matchesQuery } from "./richtext";
-import { exportBackup, importBackup } from "./backup";
-import { ingestDroppedPaths, ingestPastedImage, pasteTargetIsEditor } from "./ingest";
-import { notify } from "./notify";
-import { minutesBetween, parseUtc } from "./time";
+import { useState } from "react";
 import { LOCALES, VIEW_MSG, useI18n } from "./i18n";
+import { VIEW_ORDER } from "./types";
+import type { Tier, View } from "./types";
+import * as db from "./db";
+import { checkExcerpt } from "./richtext";
+import { exportBackup, importBackup } from "./backup";
+import { childrenOf } from "./domain/boardQuery";
+import { useToast } from "./hooks/useToast";
+import { useStudyData } from "./hooks/useStudyData";
+import { useBoardFilters } from "./hooks/useBoardFilters";
+import { useDigSession } from "./hooks/useDigSession";
+import { useFileIngest } from "./hooks/useFileIngest";
 import { CaptureBar } from "./components/CaptureBar";
 import { SessionPicker } from "./components/SessionPicker";
 import { Board } from "./components/Board";
@@ -21,260 +21,30 @@ import { ReviewPanel } from "./components/ReviewPanel";
 import { ArchivePanel } from "./components/ArchivePanel";
 import { ConfirmButton } from "./components/ConfirmButton";
 import { MoreMenu } from "./components/MoreMenu";
-import { digFloatEnabled, setDigFloatEnabled, setDigWindowVisible } from "./digFloat";
 import "./App.css";
 
 export default function App() {
   const { t, locale, setLocale } = useI18n();
-  const [allDebts, setAllDebts] = useState<Debt[]>([]);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeSession, setActiveSession] = useState<Session | null>(null);
-  const [stats, setStats] = useState<Stats>({ open: 0, resolved: 0 });
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const { toast, showToast } = useToast();
   const [view, setView] = useState<View>("board");
-  const [query, setQuery] = useState("");
-  const [archiveFilter, setArchiveFilter] = useState<"resolved" | "evicted">("resolved");
-  const [dropActive, setDropActive] = useState(false);
-  const [attachmentsVersion, setAttachmentsVersion] = useState(0);
-  const [toast, setToast] = useState<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-  const [digFinishRequested, setDigFinishRequested] = useState(false);
-  const [forceWriter, setForceWriter] = useState<null | "check">(null);
-  const [pauseDigModal, setPauseDigModal] = useState(false);
-  const [sessionOnly, setSessionOnly] = useState(true);
-  const [showRam, setShowRam] = useState(false);
-  const [showStorage, setShowStorage] = useState(false);
-  const [captureTier, setCaptureTier] = useState<Tier>("inbox");
-  const [graphEdges, setGraphEdges] = useState<GraphEdge[]>([]);
-  const [digFloat, setDigFloatState] = useState(() => digFloatEnabled());
-  const [digWindowOn, setDigWindowOn] = useState(false);
-  const digNotifiedRef = useRef(false);
-  const toastTimer = useRef<number | null>(null);
-
-  const selectedIdRef = useRef<number | null>(null);
-  const activeSessionRef = useRef<Session | null>(null);
-  const allDebtsRef = useRef<Debt[]>([]);
-  selectedIdRef.current = selectedId;
-  activeSessionRef.current = activeSession;
-  allDebtsRef.current = allDebts;
-
-  const setDigFloat = (on: boolean) => {
-    setDigFloatEnabled(on);
-    setDigFloatState(on);
-  };
-
-  const showToast = (msg: string) => {
-    setToast(msg);
-    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 2500);
-  };
-
-  const refresh = useCallback(async () => {
-    const [d, s, active, st, edges] = await Promise.all([
-      db.listAllDebts(),
-      db.listSessions(),
-      db.getActiveSession(),
-      db.getStats(),
-      db.listAllGraphEdges(),
-    ]);
-    setAllDebts(d);
-    setSessions(s);
-    setActiveSession(active);
-    setStats(st);
-    setGraphEdges(edges);
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    return () => {
-      if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
-    };
-  }, []);
-
-  const openDebts = useMemo(() => allDebts.filter((d) => d.status === "open"), [allDebts]);
-  const resolvedDebts = useMemo(
-    () => allDebts.filter((d) => d.status === "resolved"),
-    [allDebts]
-  );
-  const evictedDebts = useMemo(
-    () => allDebts.filter((d) => d.status === "evicted"),
-    [allDebts]
-  );
-  const sessionOpen = useMemo(() => {
-    if (sessionOnly && activeSession) {
-      return openDebts.filter((d) => d.session_id === activeSession.id);
-    }
-    return openDebts;
-  }, [openDebts, sessionOnly, activeSession]);
-  const visibleOpen = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return sessionOpen;
-    return sessionOpen.filter((d) => matchesQuery(d, q));
-  }, [sessionOpen, query]);
-  const visibleTiers = useMemo(
-    () => visibleBoardTiers(showRam, showStorage),
-    [showRam, showStorage]
-  );
-  const dueChecks = useMemo(
-    () =>
-      resolvedDebts.filter(
-        (d) => d.next_review_at !== null && parseUtc(d.next_review_at) <= Date.now()
-      ),
-    [resolvedDebts]
-  );
-  const archiveItems = useMemo(() => {
-    const source = archiveFilter === "resolved" ? resolvedDebts : evictedDebts;
-    const q = query.trim().toLowerCase();
-    return source.filter((d) => matchesQuery(d, q));
-  }, [archiveFilter, resolvedDebts, evictedDebts, query]);
-
-  useEffect(() => {
-    const unlisten = listen("debt-added", () => refresh());
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [refresh]);
-
-  // ---------- dig (timeboxing) ----------
-
-  const activeDig = openDebts.find((d) => d.dig_until !== null) ?? null;
-  const digExpired = activeDig !== null && now >= parseUtc(activeDig.dig_until!);
-  const digModalOpen =
-    activeDig !== null && (digExpired || digFinishRequested) && !pauseDigModal;
-  const digMinutesSpent = activeDig
-    ? Math.round(
-        (Math.min(now, parseUtc(activeDig.dig_until!)) -
-          parseUtc(activeDig.dig_started_at ?? activeDig.dig_until!)) /
-          60000
-      )
-    : 0;
-
-  useEffect(() => {
-    if (!activeDig) return;
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [activeDig?.id]);
-
-  useEffect(() => {
-    if (digExpired && activeDig && !digNotifiedRef.current) {
-      digNotifiedRef.current = true;
-      notify(t("timeboxEnded"), activeDig.title);
-      getCurrentWindow().show();
-      getCurrentWindow().setFocus();
-    }
-    if (!digExpired) digNotifiedRef.current = false;
-  }, [digExpired, activeDig?.id]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const want = Boolean(activeDig && !digModalOpen && digFloat);
-    void setDigWindowVisible(want).then((ok) => {
-      if (!cancelled) setDigWindowOn(want && ok);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeDig?.id, digModalOpen, digFloat]);
-
-  useEffect(() => {
-    const unFinish = listen("dig-finish-early", () => {
-      setDigFinishRequested(true);
-      const main = getCurrentWindow();
-      void main.show().then(() => main.setFocus());
-    });
-    const unDock = listen("dig-dock", () => {
-      setDigFloatEnabled(false);
-      setDigFloatState(false);
-      void setDigWindowVisible(false).then(() => setDigWindowOn(false));
-    });
-    return () => {
-      unFinish.then((fn) => fn());
-      unDock.then((fn) => fn());
-    };
-  }, []);
-
-  const startDig = async (id: number, minutes: number) => {
-    await db.startDig(id, minutes);
-    setDigFinishRequested(false);
-    setPauseDigModal(false);
-    setNow(Date.now());
-    await refresh();
-    showToast(t("toastDigStart", { n: minutes }));
-  };
-
-  const settleDig = async (id: number) => {
-    const current = allDebts.find((d) => d.id === id);
-    if (!current?.dig_until) return;
-    const spent =
-      activeDig?.id === id
-        ? digMinutesSpent
-        : current.dig_started_at
-          ? minutesBetween(current.dig_started_at)
-          : 0;
-    await db.endDig(id, spent);
-    setAllDebts((prev) =>
-      prev.map((d) =>
-        d.id === id ? { ...d, dig_until: null, dig_started_at: null } : d
-      )
-    );
-    setDigFinishRequested(false);
-    setPauseDigModal(false);
-  };
-
-  const closeDig = async (log: string) => {
-    if (!activeDig) return;
-    if (log) await db.appendNoteLog(activeDig.id, log);
-    await db.endDig(activeDig.id, digMinutesSpent);
-    setDigFinishRequested(false);
-    setPauseDigModal(false);
-    await refresh();
-  };
-
-  const resolveDig = async () => {
-    if (!activeDig) return;
-    if (!checkIsReady(activeDig.check_content)) {
-      setSelectedId(activeDig.id);
-      setForceWriter("check");
-      setPauseDigModal(true);
-      showToast(t("toastNeedCheck"));
-      return;
-    }
-    await db.endDig(activeDig.id, digMinutesSpent);
-    await db.resolveDebt(activeDig.id, checkExcerpt(activeDig.check_content));
-    setDigFinishRequested(false);
-    setPauseDigModal(false);
-    await refresh();
-    showToast(t("toastResolved"));
-  };
-
-  // ---------- capture ----------
-
-  const selectTier = (tier: Tier) => {
-    if (tier === "ram") {
-      if (showRam) {
-        setShowRam(false);
-        if (captureTier === "ram") setCaptureTier(showStorage ? "storage" : "inbox");
-      } else {
-        setShowRam(true);
-        setCaptureTier("ram");
-      }
-      return;
-    }
-    if (tier === "storage") {
-      if (showStorage) {
-        setShowStorage(false);
-        if (captureTier === "storage") setCaptureTier(showRam ? "ram" : "inbox");
-      } else {
-        setShowStorage(true);
-        setCaptureTier("storage");
-      }
-      return;
-    }
-    setCaptureTier(tier);
-  };
+  const data = useStudyData();
+  const board = useBoardFilters(data.allDebts, data.activeSession);
+  const dig = useDigSession({
+    openDebts: board.openDebts,
+    allDebts: data.allDebts,
+    setAllDebts: data.setAllDebts,
+    refresh: data.refresh,
+    setSelectedId: data.setSelectedId,
+    showToast,
+    t,
+  });
+  const { dropActive, attachmentsVersion } = useFileIngest({
+    selectedIdRef: data.selectedIdRef,
+    activeSessionRef: data.activeSessionRef,
+    allDebtsRef: data.allDebtsRef,
+    refresh: data.refresh,
+    showToast,
+  });
 
   const capture = async (title: string, tier: Tier, sourceUrl: string | null, note = "") => {
     const id = await db.createDebt({
@@ -282,82 +52,22 @@ export default function App() {
       tier,
       note,
       sourceUrl,
-      sessionId: activeSessionRef.current?.id ?? null,
+      sessionId: data.activeSessionRef.current?.id ?? null,
     });
-    await refresh();
+    await data.refresh();
     return id;
   };
 
-  const ingestCtx = () => ({
-    selectedId: selectedIdRef.current,
-    sessionId: activeSessionRef.current?.id ?? null,
-    debts: allDebtsRef.current,
-  });
-
-  const applyIngest = async (result: {
-    toast: string;
-    refresh: boolean;
-    bumpAttachments: boolean;
-  }) => {
-    if (result.bumpAttachments) setAttachmentsVersion((v) => v + 1);
-    if (result.refresh) await refresh();
-    showToast(result.toast);
-  };
-
-  // ---------- external file drop (Tauri drag-drop event) ----------
-
-  useEffect(() => {
-    const unlisten = getCurrentWebview().onDragDropEvent(async (event) => {
-      if (event.payload.type === "over") {
-        setDropActive(true);
-      } else if (event.payload.type === "leave") {
-        setDropActive(false);
-      } else if (event.payload.type === "drop") {
-        setDropActive(false);
-        try {
-          await applyIngest(await ingestDroppedPaths(event.payload.paths, ingestCtx()));
-        } catch (e) {
-          showToast(t("toastFileFail", { error: String(e) }));
-        }
-      }
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [refresh]);
-
-  // ---------- global paste ----------
-
-  useEffect(() => {
-    const onPaste = async (e: ClipboardEvent) => {
-      if (pasteTargetIsEditor(e.target)) return;
-
-      const items = e.clipboardData?.items ?? [];
-      for (const item of items) {
-        if (item.type.startsWith("image/")) {
-          e.preventDefault();
-          const file = item.getAsFile();
-          if (!file) continue;
-          await applyIngest(await ingestPastedImage(file, ingestCtx()));
-          return;
-        }
-      }
-    };
-    window.addEventListener("paste", onPaste);
-    return () => window.removeEventListener("paste", onPaste);
-  }, [refresh]);
-
-  // ---------- actions ----------
-
-  const selected = allDebts.find((d) => d.id === selectedId) ?? null;
-
   const evict = async (id: number) => {
-    await settleDig(id);
+    await dig.settleDig(id);
     await db.evictDebt(id);
-    if (selectedId === id) setSelectedId(null);
-    await refresh();
+    if (data.selectedId === id) data.setSelectedId(null);
+    await data.refresh();
     showToast(t("toastEvicted"));
   };
+
+  const { selected, selectedId, setSelectedId, refresh } = data;
+  const { activeDig } = dig;
 
   return (
     <div className="app">
@@ -366,8 +76,8 @@ export default function App() {
           <span className="brand-mark">◈</span> Study Map
         </div>
         <SessionPicker
-          sessions={sessions}
-          active={activeSession}
+          sessions={data.sessions}
+          active={data.activeSession}
           onSelect={async (id) => {
             await db.activateSession(id);
             await refresh();
@@ -388,9 +98,9 @@ export default function App() {
         />
         <div className="header-right">
           <div className="stats">
-            <span className="stat-explored">{t("statRepaid", { n: stats.resolved })}</span>
+            <span className="stat-explored">{t("statRepaid", { n: data.stats.resolved })}</span>
             <span className="stat-sep">·</span>
-            <span className="stat-unexplored">{t("statOpen", { n: stats.open })}</span>
+            <span className="stat-unexplored">{t("statOpen", { n: data.stats.open })}</span>
           </div>
           <div className="view-toggle">
             {VIEW_ORDER.map((key) => (
@@ -399,8 +109,8 @@ export default function App() {
                 className={view === key ? "active" : ""}
                 onClick={() => setView(key)}
               >
-                {key === "review" && dueChecks.length > 0
-                  ? t("reviewCount", { n: dueChecks.length })
+                {key === "review" && board.dueChecks.length > 0
+                  ? t("reviewCount", { n: board.dueChecks.length })
                   : t(VIEW_MSG[key])}
               </button>
             ))}
@@ -441,10 +151,10 @@ export default function App() {
               type="button"
               className="more-menu-item"
               role="menuitem"
-              aria-pressed={digFloat}
-              onClick={() => setDigFloat(!digFloat)}
+              aria-pressed={dig.digFloat}
+              onClick={() => dig.setDigFloat(!dig.digFloat)}
             >
-              {digFloat ? t("dockTimer") : t("floatTimer")}
+              {dig.digFloat ? t("dockTimer") : t("floatTimer")}
             </button>
             <div className="more-menu-sep" />
             <div className="more-menu-label">{t("language")}</div>
@@ -464,40 +174,39 @@ export default function App() {
         </div>
       </header>
 
-      {activeDig && !digModalOpen && !digWindowOn && (
+      {activeDig && !dig.digModalOpen && !dig.digWindowOn && (
         <DigBar
           debt={activeDig}
-          now={now}
-          onFinishEarly={() => setDigFinishRequested(true)}
-          onFloat={() => setDigFloat(true)}
+          now={dig.now}
+          onFinishEarly={() => dig.setDigFinishRequested(true)}
+          onFloat={() => dig.setDigFloat(true)}
         />
       )}
 
       {view === "board" && (
         <CaptureBar
           onCapture={capture}
-          query={query}
-          onQuery={setQuery}
-          sessionTopic={activeSession?.topic ?? null}
-          sessionOnly={sessionOnly}
-          onToggleSession={() => setSessionOnly((v) => !v)}
-          captureTier={captureTier}
-          extraTiers={{ ram: showRam, storage: showStorage }}
-          onSelectTier={selectTier}
+          query={board.query}
+          onQuery={board.setQuery}
+          sessionTopic={data.activeSession?.topic ?? null}
+          sessionOnly={board.sessionOnly}
+          onToggleSession={() => board.setSessionOnly((v) => !v)}
+          captureTier={board.captureTier}
+          extraTiers={{ ram: board.showRam, storage: board.showStorage }}
+          onSelectTier={board.selectTier}
         />
       )}
 
       <main className={`main ${selected ? "with-panel" : ""}`}>
         {view === "board" && (
           <Board
-            debts={visibleOpen}
+            debts={board.visibleOpen}
             selectedId={selectedId}
-            visibleTiers={visibleTiers}
-            onSelect={(id) => setSelectedId(id)}
+            visibleTiers={board.visibleTiers}
+            onSelect={setSelectedId}
             onMove={async (id, tier) => {
               await db.setTier(id, tier);
-              if (tier === "ram") setShowRam(true);
-              if (tier === "storage") setShowStorage(true);
+              board.revealTier(tier);
               await refresh();
             }}
           />
@@ -505,26 +214,26 @@ export default function App() {
 
         {view === "graph" && (
           <GraphView
-            debts={allDebts}
+            debts={data.allDebts}
             selectedId={selectedId}
-            onSelectDebt={(id) => setSelectedId(id)}
+            onSelectDebt={setSelectedId}
             showToast={showToast}
           />
         )}
 
         {view === "review" && (
           <ReviewPanel
-            debts={openDebts}
-            dueChecks={dueChecks}
-            graphEdges={graphEdges}
-            activeSession={activeSession}
+            debts={board.openDebts}
+            dueChecks={board.dueChecks}
+            graphEdges={data.graphEdges}
+            activeSession={data.activeSession}
             digActive={activeDig !== null}
-            onSelect={(id) => setSelectedId(id)}
-            onStartDig={startDig}
+            onSelect={setSelectedId}
+            onStartDig={dig.startDig}
             onEvict={evict}
             onEvictMany={async (ids) => {
               for (const id of ids) {
-                await settleDig(id);
+                await dig.settleDig(id);
                 await db.evictDebt(id);
               }
               setSelectedId(null);
@@ -547,34 +256,35 @@ export default function App() {
 
         {view === "resolved" && (
           <ArchivePanel
-            items={archiveItems}
-            filter={archiveFilter}
-            resolvedCount={resolvedDebts.length}
-            evictedCount={evictedDebts.length}
-            query={query}
+            items={board.archiveItems}
+            filter={board.archiveFilter}
+            resolvedCount={board.resolvedDebts.length}
+            evictedCount={board.evictedDebts.length}
+            query={board.query}
             selectedId={selectedId}
-            onFilter={setArchiveFilter}
-            onQuery={setQuery}
+            onFilter={board.setArchiveFilter}
+            onQuery={board.setQuery}
             onSelect={setSelectedId}
           />
         )}
 
         {selected && (
           <DetailPanel
+            key={selected.id}
             debt={selected}
             digActive={activeDig !== null}
-            onStartDig={startDig}
+            onStartDig={dig.startDig}
             attachmentsVersion={attachmentsVersion}
             diggingThis={activeDig?.id === selected.id}
-            childrenDebts={allDebts.filter((d) => d.parent_id === selected.id)}
-            onSelectRelated={(id) => setSelectedId(id)}
+            childrenDebts={childrenOf(data.allDebts, selected.id)}
+            onSelectRelated={setSelectedId}
             onSplit={async (parentId, title, note) => {
-              const parent = allDebts.find((d) => d.id === parentId);
+              const parent = data.allDebts.find((d) => d.id === parentId);
               await db.createDebt({
                 title,
                 note,
                 tier: "cache",
-                sessionId: parent?.session_id ?? activeSessionRef.current?.id ?? null,
+                sessionId: parent?.session_id ?? data.activeSessionRef.current?.id ?? null,
                 parentId,
               });
               await refresh();
@@ -585,15 +295,15 @@ export default function App() {
               await refresh();
             }}
             onClose={() => setSelectedId(null)}
-            forceWriter={forceWriter}
-            onForceWriterHandled={() => setForceWriter(null)}
+            forceWriter={dig.forceWriter}
+            onForceWriterHandled={() => dig.setForceWriter(null)}
             onSaveNote={async (id, note) => {
               await db.updateDebt(id, { note });
-              setAllDebts((prev) => prev.map((d) => (d.id === id ? { ...d, note } : d)));
+              data.setAllDebts((prev) => prev.map((d) => (d.id === id ? { ...d, note } : d)));
             }}
             onSaveCheck={async (id, check) => {
               await db.updateDebt(id, { check_content: check });
-              setAllDebts((prev) =>
+              data.setAllDebts((prev) =>
                 prev.map((d) => (d.id === id ? { ...d, check_content: check } : d))
               );
             }}
@@ -609,13 +319,12 @@ export default function App() {
               await db.updateDebt(id, { session_id: sessionId });
               await refresh();
             }}
-            sessions={sessions}
+            sessions={data.sessions}
             onResolve={async (id, checkHtml) => {
               await db.updateDebt(id, { check_content: checkHtml });
-              await settleDig(id);
+              await dig.settleDig(id);
               await db.resolveDebt(id, checkExcerpt(checkHtml) || t("checkFallback"));
-              setDigFinishRequested(false);
-              setPauseDigModal(false);
+              dig.clearDigUi();
               await refresh();
               showToast(t("toastResolved"));
             }}
@@ -625,7 +334,7 @@ export default function App() {
             }}
             onEvict={evict}
             onDelete={async (id) => {
-              await settleDig(id);
+              await dig.settleDig(id);
               await db.deleteDebt(id);
               setSelectedId(null);
               await refresh();
@@ -634,19 +343,14 @@ export default function App() {
         )}
       </main>
 
-      {digModalOpen && activeDig && (
+      {dig.digModalOpen && activeDig && (
         <DigEndModal
           debt={activeDig}
-          minutesSpent={digMinutesSpent}
-          expired={digExpired}
-          onResolve={resolveDig}
-          onNeedCheck={() => {
-            setSelectedId(activeDig.id);
-            setForceWriter("check");
-            setPauseDigModal(true);
-            showToast(t("toastWriteCheck"));
-          }}
-          onReturn={closeDig}
+          minutesSpent={dig.digMinutesSpent}
+          expired={dig.digExpired}
+          onResolve={dig.resolveDig}
+          onNeedCheck={dig.needCheckFromModal}
+          onReturn={dig.closeDig}
         />
       )}
 

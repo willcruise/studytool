@@ -1,16 +1,9 @@
 import { useState } from "react";
 import type { Debt } from "../types";
 import { checkIsReady } from "../richtext";
-import { parseUtc } from "../time";
+import { fmtCountdown, parseUtc } from "../time";
 import { handleTextareaTab } from "../keys";
 import { useI18n } from "../i18n";
-
-function fmt(ms: number): string {
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
 
 // ---------- top bar shown while a dig is running ----------
 
@@ -29,7 +22,7 @@ export function DigBar({ debt, now, onFinishEarly, onFloat }: BarProps) {
       <span className="dig-pulse" />
       <span className="dig-label">{t("digging")}</span>
       <span className="dig-title">{debt.title}</span>
-      <span className="dig-timer">{fmt(remaining)}</span>
+      <span className="dig-timer">{fmtCountdown(remaining)}</span>
       <button
         type="button"
         className="ghost-btn"
@@ -44,7 +37,7 @@ export function DigBar({ debt, now, onFinishEarly, onFloat }: BarProps) {
           />
         </svg>
       </button>
-      <button className="ghost-btn" onClick={onFinishEarly}>
+      <button type="button" className="ghost-btn" onClick={onFinishEarly}>
         {t("finishNow")}
       </button>
     </div>

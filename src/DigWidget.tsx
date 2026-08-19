@@ -1,56 +1,94 @@
-import { useEffect, useState } from "react";
-import { emitTo } from "@tauri-apps/api/event";
+import { useEffect, useRef, useState } from "react";
+import { emit } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getActiveDig } from "./db";
 import type { Debt } from "./types";
-import { parseUtc } from "./time";
+import { fmtCountdown, parseUtc } from "./time";
+import { rememberDigWindowPos, startDigWindowDrag } from "./digFloat";
 import { useI18n } from "./i18n";
 import "./DigWidget.css";
-
-function fmt(ms: number): string {
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
 
 export default function DigWidget() {
   const { t } = useI18n();
   const [debt, setDebt] = useState<Debt | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const busy = useRef(false);
+  const sawFocus = useRef(false);
+  const dismissArmed = useRef(false);
+
+  const send = async (event: "dig-dock" | "dig-finish-early") => {
+    if (busy.current) return;
+    busy.current = true;
+    try {
+      await emit(event);
+      await getCurrentWindow().hide();
+    } catch {
+      busy.current = false;
+    }
+  };
+
+  const dock = () => send("dig-dock");
+  const finish = () => send("dig-finish-early");
 
   useEffect(() => {
-    const load = async () => setDebt(await getActiveDig());
-    load();
-    const poll = window.setInterval(load, 1000);
-    const tick = window.setInterval(() => setNow(Date.now()), 1000);
+    const tick = window.setInterval(async () => {
+      setNow(Date.now());
+      setDebt(await getActiveDig());
+    }, 1000);
+    void getActiveDig().then(setDebt);
+    return () => window.clearInterval(tick);
+  }, []);
+
+  useEffect(() => {
+    const win = getCurrentWindow();
+    const unmoved = win.onMoved(({ payload }) => {
+      rememberDigWindowPos(payload.x, payload.y);
+    });
+    const unfocus = win.onFocusChanged(({ payload: focused }) => {
+      if (focused) {
+        sawFocus.current = true;
+        dismissArmed.current = false;
+        window.setTimeout(() => {
+          dismissArmed.current = true;
+        }, 400);
+        return;
+      }
+      if (!sawFocus.current || !dismissArmed.current || busy.current) return;
+      void dock();
+    });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") void dock();
+    };
+    window.addEventListener("keydown", onKey);
     return () => {
-      window.clearInterval(poll);
-      window.clearInterval(tick);
+      unmoved.then((fn) => fn());
+      unfocus.then((fn) => fn());
+      window.removeEventListener("keydown", onKey);
     };
   }, []);
 
-  if (!debt?.dig_until) {
-    return <div className="dig-widget empty">{t("digging")}</div>;
-  }
-
-  const remaining = parseUtc(debt.dig_until) - now;
+  const remaining = debt?.dig_until ? parseUtc(debt.dig_until) - now : 0;
 
   return (
     <div className="dig-widget">
-      <div className="dig-widget-drag" data-tauri-drag-region>
+      <div className="dig-widget-drag" onMouseDown={startDigWindowDrag}>
         <span className="dig-pulse" />
         <div className="dig-widget-copy">
           <span className="dig-label">{t("digging")}</span>
-          <span className="dig-title">{debt.title}</span>
+          <span className="dig-title">{debt?.title ?? t("digging")}</span>
         </div>
-        <span className="dig-timer">{fmt(remaining)}</span>
+        <span className="dig-timer">{fmtCountdown(remaining)}</span>
       </div>
-      <div className="dig-widget-actions">
+      <div
+        className="dig-widget-actions"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <button
+          type="button"
           className="ghost-btn"
           title={t("dockTimer")}
           aria-label={t("dockTimer")}
-          onClick={() => emitTo("main", "dig-dock")}
+          onClick={() => void dock()}
         >
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
             <path
@@ -59,7 +97,7 @@ export default function DigWidget() {
             />
           </svg>
         </button>
-        <button className="ghost-btn" onClick={() => emitTo("main", "dig-finish-early")}>
+        <button type="button" className="ghost-btn" onClick={() => void finish()}>
           {t("finishNow")}
         </button>
       </div>

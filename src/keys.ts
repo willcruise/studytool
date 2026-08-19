@@ -19,6 +19,12 @@ function lineBounds(value: string, start: number, end: number): { from: number; 
   return { from, to: nl === -1 ? value.length : nl };
 }
 
+export function autosizeTextarea(el: HTMLTextAreaElement | null, maxPx: number) {
+  if (!el) return;
+  el.style.height = "0px";
+  el.style.height = `${Math.min(maxPx, el.scrollHeight)}px`;
+}
+
 /** Tab indents (Shift+Tab outdents) instead of moving focus. */
 export function handleTextareaTab(
   e: KeyboardEvent<HTMLTextAreaElement>,

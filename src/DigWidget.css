@@ -23,18 +23,17 @@ body,
   user-select: none;
 }
 
-.dig-widget.empty {
-  color: #8b93a1;
-  font-size: 12px;
-}
-
 .dig-widget-drag {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-  cursor: move;
+  cursor: grab;
+}
+
+.dig-widget-drag:active {
+  cursor: grabbing;
 }
 
 .dig-widget-copy {
@@ -100,10 +99,10 @@ body,
   border: 1px solid #2b313b;
   color: #8b93a1;
   border-radius: 8px;
-  padding: 4px 8px;
-  font-size: 11px;
+  padding: 6px 10px;
+  font-size: 12px;
   cursor: pointer;
-  -webkit-app-region: no-drag;
+  min-height: 28px;
 }
 
 .dig-widget-actions .ghost-btn:hover {
