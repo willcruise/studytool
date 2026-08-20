@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Debt } from "../types";
@@ -22,6 +22,8 @@ interface Args {
   setSelectedId: (id: number | null) => void;
   showToast: (msg: string) => void;
   t: TFn;
+  /** Flush the open detail editors so Check/Memo hit SQLite before wrap-up. */
+  flushDetailRef: MutableRefObject<(() => Promise<void>) | null>;
 }
 
 /** Timebox state, floating timer, and wrap-up modal. Independent of board layout. */
@@ -33,6 +35,7 @@ export function useDigSession({
   setSelectedId,
   showToast,
   t,
+  flushDetailRef,
 }: Args) {
   const [now, setNow] = useState(() => Date.now());
   const [digFinishRequested, setDigFinishRequested] = useState(false);
@@ -41,6 +44,7 @@ export function useDigSession({
   const [digFloat, setDigFloatState] = useState(() => digFloatEnabled());
   const [digWindowOn, setDigWindowOn] = useState(false);
   const digNotifiedRef = useRef(false);
+  const startingRef = useRef(false);
 
   const setDigFloat = (on: boolean) => {
     setDigFloatEnabled(on);
@@ -88,11 +92,27 @@ export function useDigSession({
   }, [activeDig?.id, digModalOpen, digFloat]);
 
   useEffect(() => {
+    if (!digModalOpen) return;
+    void flushDetailRef.current?.();
+  }, [digModalOpen]);
+
+  const requestFinish = async () => {
+    try {
+      await flushDetailRef.current?.();
+    } catch {
+      /* still open wrap-up with whatever is already saved */
+    }
+    setPauseDigModal(false);
+    setDigFinishRequested(true);
+  };
+
+  useEffect(() => {
     return subscribeDigWidgetEvents({
       onFinishEarly: () => {
-        setDigFinishRequested(true);
-        const main = getCurrentWindow();
-        void main.show().then(() => main.setFocus());
+        void requestFinish().then(() => {
+          const main = getCurrentWindow();
+          void main.show().then(() => main.setFocus());
+        });
       },
       onDock: () => {
         setDigFloatEnabled(false);
@@ -107,20 +127,32 @@ export function useDigSession({
     const armedAt = Date.now() + 400;
     const dock = () => {
       if (Date.now() < armedAt) return;
-      setDigFloat(false);
-      void setDigWindowVisible(false).then(() => setDigWindowOn(false));
+      // Defer so the originating click (Repay, Finish now, …) still fires.
+      window.setTimeout(() => {
+        setDigFloat(false);
+        void setDigWindowVisible(false).then(() => setDigWindowOn(false));
+      }, 0);
     };
     window.addEventListener("pointerdown", dock);
     return () => window.removeEventListener("pointerdown", dock);
   }, [digWindowOn]);
 
   const startDig = async (id: number, minutes: number) => {
-    await db.startDig(id, minutes);
-    setDigFinishRequested(false);
-    setPauseDigModal(false);
-    setNow(Date.now());
-    await refresh();
-    showToast(t("toastDigStart", { n: minutes }));
+    if (startingRef.current || openDebts.some((d) => d.dig_until !== null)) {
+      showToast(t("toastDigBusy"));
+      return;
+    }
+    startingRef.current = true;
+    try {
+      await db.startDig(id, minutes);
+      setDigFinishRequested(false);
+      setPauseDigModal(false);
+      setNow(Date.now());
+      await refresh();
+      showToast(t("toastDigStart", { n: minutes }));
+    } finally {
+      startingRef.current = false;
+    }
   };
 
   const settleDig = async (id: number) => {
@@ -144,6 +176,11 @@ export function useDigSession({
 
   const closeDig = async (log: string) => {
     if (!activeDig) return;
+    try {
+      await flushDetailRef.current?.();
+    } catch {
+      /* keep closing with whatever is already saved */
+    }
     if (log) await db.appendNoteLog(activeDig.id, log);
     await db.endDig(activeDig.id, digMinutesSpent);
     setDigFinishRequested(false);
@@ -153,27 +190,48 @@ export function useDigSession({
 
   const resolveDig = async () => {
     if (!activeDig) return;
-    if (!checkIsReady(activeDig.check_content)) {
+    try {
+      await flushDetailRef.current?.();
+    } catch {
+      /* fall through and read whatever SQLite has */
+    }
+    const latest = (await db.getDebt(activeDig.id)) ?? activeDig;
+    const check = latest.check_content;
+    if (!checkIsReady(check)) {
       setSelectedId(activeDig.id);
       setForceWriter("check");
       setPauseDigModal(true);
       showToast(t("toastNeedCheck"));
       return;
     }
-    await db.endDig(activeDig.id, digMinutesSpent);
-    await db.resolveDebt(activeDig.id, checkExcerpt(activeDig.check_content));
-    setDigFinishRequested(false);
-    setPauseDigModal(false);
-    await refresh();
-    showToast(t("toastResolved"));
+    try {
+      await db.endDig(activeDig.id, digMinutesSpent);
+      await db.resolveDebt(activeDig.id, checkExcerpt(check) || t("checkFallback"));
+      setDigFinishRequested(false);
+      setPauseDigModal(false);
+      await refresh();
+      showToast(t("toastResolved"));
+    } catch (err) {
+      console.error(err);
+      showToast(t("toastSaveFailed"));
+    }
   };
 
-  const needCheckFromModal = () => {
+  const resumeDig = () => {
+    setDigFinishRequested(false);
+    const stillRunning =
+      activeDig !== null && Date.now() < parseUtc(activeDig.dig_until!);
+    setPauseDigModal(!stillRunning);
+  };
+
+  const extendDig = async (minutes: number) => {
     if (!activeDig) return;
-    setSelectedId(activeDig.id);
-    setForceWriter("check");
-    setPauseDigModal(true);
-    showToast(t("toastWriteCheck"));
+    await db.extendDig(activeDig.id, minutes);
+    setDigFinishRequested(false);
+    setPauseDigModal(false);
+    setNow(Date.now());
+    await refresh();
+    showToast(t("toastDigMore", { n: minutes }));
   };
 
   const clearDigUi = () => {
@@ -196,8 +254,10 @@ export function useDigSession({
     settleDig,
     closeDig,
     resolveDig,
-    needCheckFromModal,
+    resumeDig,
+    extendDig,
     clearDigUi,
     setDigFinishRequested,
+    requestFinish,
   };
 }

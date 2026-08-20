@@ -49,16 +49,21 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
   const [newName, setNewName] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
+  const creatingLock = useRef(false);
 
   // refs so force-graph callbacks (bound once) see current state
   const selectedRef = useRef(selectedId);
   const graphIdRef = useRef(currentGraphId);
   const linkModeRef = useRef(linkMode);
   const pendingRef = useRef(pendingLink);
+  const toastRef = useRef(showToast);
+  const tRef = useRef(t);
   selectedRef.current = selectedId;
   graphIdRef.current = currentGraphId;
   linkModeRef.current = linkMode;
   pendingRef.current = pendingLink;
+  toastRef.current = showToast;
+  tRef.current = t;
 
   const loadGraphs = useCallback(async () => {
     setGraphs(await db.listGraphs());
@@ -75,9 +80,11 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
     }
   }, []);
 
+  const topologyKey = debts.map((d) => `${d.id}:${d.parent_id ?? ""}`).join(",");
+
   useEffect(() => {
-    loadGraphs();
-  }, [loadGraphs]);
+    void loadGraphs();
+  }, [loadGraphs, topologyKey]);
 
   useEffect(() => {
     loadGraphContent(currentGraphId);
@@ -85,6 +92,29 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
     setPendingLink(null);
     setPickerOpen(false);
   }, [currentGraphId, loadGraphContent]);
+
+  useEffect(() => {
+    if (currentGraphId === null) return;
+    void loadGraphContent(currentGraphId);
+  }, [topologyKey, currentGraphId, loadGraphContent]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (pendingLink !== null) {
+        setPendingLink(null);
+        return;
+      }
+      if (linkMode) setLinkMode(false);
+      if (pickerOpen) setPickerOpen(false);
+      if (creating) {
+        setCreating(false);
+        setNewName("");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pendingLink, linkMode, pickerOpen, creating]);
 
   // ---------- force-graph instance ----------
 
@@ -98,6 +128,11 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
       .linkColor((l) => (l.manual ? "rgba(83, 155, 245, 0.65)" : "rgba(139, 147, 161, 0.25)"))
       .linkWidth((l) => (l.manual ? 1.8 : 1.2))
       .linkLineDash((l) => (l.manual ? null : [2, 2]))
+      .linkDirectionalArrowLength((l) => (l.manual ? 6 : 0))
+      .linkDirectionalArrowRelPos(1)
+      .linkDirectionalArrowColor((l) =>
+        l.manual ? "rgba(83, 155, 245, 0.9)" : "rgba(139, 147, 161, 0.4)"
+      )
       .nodeCanvasObject((node, ctx, scale) => {
         const r = node.kind === "session" ? 9 : 5;
         const isSelected = node.debtId != null && node.debtId === selectedRef.current;
@@ -156,6 +191,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
         }
       })
       .onLinkClick((link) => {
+        if (!linkModeRef.current) return;
         const gid = graphIdRef.current;
         if (gid === null || !link.manual) return;
         // after layout starts, source/target are node objects; before that, string ids like "d12"
@@ -167,12 +203,18 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
         const a = endpointDebtId(link.source);
         const b = endpointDebtId(link.target);
         if (a == null || b == null) return;
-        db.removeGraphEdge(gid, a, b).then(() => loadGraphContent(gid));
+        db.removeGraphEdge(gid, a, b).then(() => {
+          loadGraphContent(gid);
+          toastRef.current(tRef.current("toastEdgeRemoved"));
+        });
       })
       .onNodeRightClick((node) => {
         const gid = graphIdRef.current;
         if (gid === null || node.kind !== "debt" || node.debtId == null) return;
-        db.removeGraphNode(gid, node.debtId).then(() => loadGraphContent(gid));
+        db.removeGraphNode(gid, node.debtId).then(() => {
+          loadGraphContent(gid);
+          toastRef.current(tRef.current("toastNodeRemoved"));
+        });
       });
 
     graphRef.current = graph;
@@ -214,10 +256,9 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
       const included = visible.filter((d) => idSet.has(d.id));
       for (const d of included) nodes.push(debtNode(d));
 
-      const manualPairs = new Set<string>();
+      const directed = new Set(edges.map((e) => `${e.a_debt}-${e.b_debt}`));
       for (const e of edges) {
         if (idSet.has(e.a_debt) && idSet.has(e.b_debt)) {
-          manualPairs.add(`${e.a_debt}-${e.b_debt}`);
           links.push({ source: `d${e.a_debt}`, target: `d${e.b_debt}`, manual: true });
         }
       }
@@ -232,9 +273,10 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
         if (ids.length > 6) continue; // avoid clutter on large groups
         for (let i = 0; i < ids.length; i++) {
           for (let j = i + 1; j < ids.length; j++) {
-            const [lo, hi] = ids[i] < ids[j] ? [ids[i], ids[j]] : [ids[j], ids[i]];
-            if (!manualPairs.has(`${lo}-${hi}`)) {
-              links.push({ source: `d${lo}`, target: `d${hi}`, manual: false });
+            const a = ids[i];
+            const b = ids[j];
+            if (!directed.has(`${a}-${b}`) && !directed.has(`${b}-${a}`)) {
+              links.push({ source: `d${a}`, target: `d${b}`, manual: false });
             }
           }
         }
@@ -248,13 +290,22 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
 
   const createNewGraph = async () => {
     const name = newName.trim();
-    if (!name) return;
-    const id = await db.createGraph(name);
-    setNewName("");
-    setCreating(false);
-    await loadGraphs();
-    setCurrentGraphId(id);
-    setPickerOpen(true);
+    if (!name) {
+      setCreating(false);
+      return;
+    }
+    if (creatingLock.current) return;
+    creatingLock.current = true;
+    try {
+      const id = await db.createGraph(name);
+      setNewName("");
+      setCreating(false);
+      await loadGraphs();
+      setCurrentGraphId(id);
+      setPickerOpen(true);
+    } finally {
+      creatingLock.current = false;
+    }
   };
 
   const renameGraph = async () => {
@@ -337,10 +388,13 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.nativeEvent.isComposing) createNewGraph();
-              if (e.key === "Escape") setCreating(false);
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) void createNewGraph();
+              if (e.key === "Escape") {
+                setCreating(false);
+                setNewName("");
+              }
             }}
-            onBlur={() => setCreating(false)}
+            onBlur={() => void createNewGraph()}
           />
         ) : (
           <button className="ghost-btn" onClick={() => setCreating(true)}>

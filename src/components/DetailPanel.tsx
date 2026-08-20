@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
 import type { Attachment, Debt, Session } from "../types";
 import { TIER_META } from "../types";
 import { listAttachments, removeAttachment } from "../db";
@@ -15,13 +15,15 @@ interface Props {
   digActive: boolean;
   onStartDig: (id: number, minutes: number) => void;
   onClose: () => void;
-  onSaveNote: (id: number, note: string) => void;
-  onSaveCheck: (id: number, check: string) => void;
+  onSaveNote: (id: number, note: string) => void | Promise<void>;
+  onSaveCheck: (id: number, check: string) => void | Promise<void>;
   onSaveTitle: (id: number, title: string) => void;
   onSaveUrl: (id: number, url: string | null) => void;
   onSetSession: (id: number, sessionId: number | null) => void;
   sessions: Session[];
-  onResolve: (id: number, summary: string) => void;
+  onResolve: (id: number, summary: string) => void | Promise<void>;
+  showToast: (msg: string) => void;
+  flushRef?: MutableRefObject<(() => Promise<void>) | null>;
   onReopen: (id: number) => void;
   onEvict: (id: number) => void;
   onDelete: (id: number) => void;
@@ -48,6 +50,8 @@ export function DetailPanel({
   onSetSession,
   sessions,
   onResolve,
+  showToast,
+  flushRef,
   onReopen,
   onEvict,
   onDelete,
@@ -71,7 +75,6 @@ export function DetailPanel({
   const [writer, setWriter] = useState<null | "note" | "check">(null);
   const [noteRev, setNoteRev] = useState(0);
   const [splitTitle, setSplitTitle] = useState("");
-  const [splitting, setSplitting] = useState(false);
   const [showPaths, setShowPaths] = useState(false);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const noteEditorRef = useRef<RichEditorHandle>(null);
@@ -89,7 +92,7 @@ export function DetailPanel({
   onSaveNoteRef.current = onSaveNote;
   onSaveCheckRef.current = onSaveCheck;
 
-  const flushNow = (id: number) => {
+  const flushNow = async (id: number) => {
     window.clearTimeout(noteTimer.current);
     window.clearTimeout(checkTimer.current);
     noteTimer.current = 0;
@@ -98,22 +101,32 @@ export function DetailPanel({
       console.warn("[DetailPanel] skip flush; editor", editingIdRef.current, "target", id);
       return;
     }
+    const jobs: Promise<unknown>[] = [];
     if (noteRef.current !== origNoteRef.current) {
-      onSaveNoteRef.current(id, noteRef.current);
+      jobs.push(Promise.resolve(onSaveNoteRef.current(id, noteRef.current)));
       origNoteRef.current = noteRef.current;
     }
     if (checkRef.current !== origCheckRef.current) {
-      onSaveCheckRef.current(id, checkRef.current);
+      jobs.push(Promise.resolve(onSaveCheckRef.current(id, checkRef.current)));
       origCheckRef.current = checkRef.current;
     }
+    await Promise.all(jobs);
   };
 
   useEffect(() => {
     const id = debt.id;
     return () => {
-      flushNow(id);
+      void flushNow(id);
     };
   }, [debt.id]);
+
+  useEffect(() => {
+    if (!flushRef) return;
+    flushRef.current = () => flushNow(editingIdRef.current);
+    return () => {
+      flushRef.current = null;
+    };
+  }, [flushRef]);
 
   useEffect(() => {
     setNote(debt.note);
@@ -125,7 +138,6 @@ export function DetailPanel({
     setWriter(null);
     setNoteRev(0);
     setSplitTitle("");
-    setSplitting(false);
     setShowPaths(false);
     origNoteRef.current = debt.note;
     origCheckRef.current = debt.check_content ?? "";
@@ -200,15 +212,34 @@ export function DetailPanel({
   const flush = () => flushNow(editingIdRef.current);
 
   const close = () => {
-    flush();
+    void flush();
     onClose();
+  };
+
+  const tryResolve = async () => {
+    await flush();
+    const html = checkRef.current;
+    if (!checkIsReady(html)) {
+      setWriter("check");
+      showToast(t("toastNeedCheck"));
+      return;
+    }
+    try {
+      await onResolve(debt.id, html);
+    } catch (err) {
+      console.error(err);
+      showToast(t("toastSaveFailed"));
+    }
   };
 
   const submitSplit = () => {
     const selected = noteEditorRef.current?.selectedText() ?? "";
     const typed = splitTitle.trim();
     const title = (typed || selected.split("\n")[0] || "").slice(0, 160).trim();
-    if (!title) return;
+    if (!title) {
+      showToast(t("splitNeedTitle"));
+      return;
+    }
     const note = selected && selected !== title ? selected : "";
     onSplit(debt.id, title, note);
     setSplitTitle("");
@@ -373,8 +404,8 @@ export function DetailPanel({
         />
       </div>
 
-      {debt.status === "open" && (diggingThis || splitting) && (
-        <div className={`split-box ${diggingThis ? "hot" : ""}`}>
+      {debt.status === "open" && diggingThis && (
+        <div className="split-box hot">
           <label className="detail-label">{t("split")}</label>
           <div className="split-row">
             <input
@@ -389,16 +420,11 @@ export function DetailPanel({
                 }
               }}
             />
-            <button className="ghost-btn" onClick={submitSplit}>
+            <button type="button" className="ghost-btn" onClick={submitSplit}>
               {t("makeSplit")}
             </button>
           </div>
         </div>
-      )}
-      {debt.status === "open" && !diggingThis && !splitting && (
-        <button className="add-link-btn" onClick={() => setSplitting(true)}>
-          {t("addSplit")}
-        </button>
       )}
 
       {childrenDebts.length > 0 && (
@@ -422,6 +448,11 @@ export function DetailPanel({
         {writer === "check" && (
           <header className="writer-header">
             <h3>Check</h3>
+            {debt.status === "open" && (
+              <button type="button" className="primary-btn" onClick={() => void tryResolve()}>
+                {t("resolve")}
+              </button>
+            )}
           </header>
         )}
         <RichEditor
@@ -488,20 +519,24 @@ export function DetailPanel({
 
       {debt.status === "open" && (
         <div className="detail-actions">
-          <button
-            className="primary-btn"
-            disabled={!checkIsReady(check)}
-            onClick={() => {
-              flush();
-              onResolve(debt.id, check);
-            }}
-          >
+          <button type="button" className="primary-btn" onClick={() => void tryResolve()}>
             {t("resolve")}
           </button>
-          <button className="ghost-btn" onClick={() => onEvict(debt.id)}>
-            {t("evict")}
-          </button>
-          <ConfirmButton label={t("delete")} confirmLabel={t("confirmDelete")} onConfirm={() => onDelete(debt.id)} />
+          <ConfirmButton
+            label={t("evict")}
+            confirmLabel={t("evictConfirm")}
+            className="ghost-btn"
+            onConfirm={() => {
+              void flush().then(() => onEvict(debt.id));
+            }}
+          />
+          <ConfirmButton
+            label={t("delete")}
+            confirmLabel={t("confirmDelete")}
+            onConfirm={() => {
+              void flush().then(() => onDelete(debt.id));
+            }}
+          />
         </div>
       )}
 

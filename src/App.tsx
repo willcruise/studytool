@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { LOCALES, VIEW_MSG, useI18n } from "./i18n";
 import { VIEW_ORDER } from "./types";
 import type { Tier, View } from "./types";
@@ -27,6 +27,7 @@ export default function App() {
   const { t, locale, setLocale } = useI18n();
   const { toast, showToast } = useToast();
   const [view, setView] = useState<View>("board");
+  const flushDetailRef = useRef<(() => Promise<void>) | null>(null);
   const data = useStudyData();
   const board = useBoardFilters(data.allDebts, data.activeSession);
   const dig = useDigSession({
@@ -37,6 +38,7 @@ export default function App() {
     setSelectedId: data.setSelectedId,
     showToast,
     t,
+    flushDetailRef,
   });
   const { dropActive, attachmentsVersion } = useFileIngest({
     selectedIdRef: data.selectedIdRef,
@@ -59,6 +61,11 @@ export default function App() {
   };
 
   const evict = async (id: number) => {
+    try {
+      await flushDetailRef.current?.();
+    } catch {
+      /* evict with whatever is already saved */
+    }
     await dig.settleDig(id);
     await db.evictDebt(id);
     if (data.selectedId === id) data.setSelectedId(null);
@@ -178,7 +185,7 @@ export default function App() {
         <DigBar
           debt={activeDig}
           now={dig.now}
-          onFinishEarly={() => dig.setDigFinishRequested(true)}
+          onFinishEarly={() => void dig.requestFinish()}
           onFloat={() => dig.setDigFloat(true)}
         />
       )}
@@ -260,10 +267,10 @@ export default function App() {
             filter={board.archiveFilter}
             resolvedCount={board.resolvedDebts.length}
             evictedCount={board.evictedDebts.length}
-            query={board.query}
+            query={board.archiveQuery}
             selectedId={selectedId}
             onFilter={board.setArchiveFilter}
-            onQuery={board.setQuery}
+            onQuery={board.setArchiveQuery}
             onSelect={setSelectedId}
           />
         )}
@@ -280,13 +287,16 @@ export default function App() {
             onSelectRelated={setSelectedId}
             onSplit={async (parentId, title, note) => {
               const parent = data.allDebts.find((d) => d.id === parentId);
-              await db.createDebt({
+              const childId = await db.createDebt({
                 title,
                 note,
                 tier: "cache",
                 sessionId: parent?.session_id ?? data.activeSessionRef.current?.id ?? null,
                 parentId,
               });
+              if (childId) {
+                await db.recordSplitGraph(parentId, childId, parent?.title ?? title);
+              }
               await refresh();
               showToast(t("toastSplit"));
             }}
@@ -320,13 +330,20 @@ export default function App() {
               await refresh();
             }}
             sessions={data.sessions}
+            flushRef={flushDetailRef}
+            showToast={showToast}
             onResolve={async (id, checkHtml) => {
-              await db.updateDebt(id, { check_content: checkHtml });
-              await dig.settleDig(id);
-              await db.resolveDebt(id, checkExcerpt(checkHtml) || t("checkFallback"));
-              dig.clearDigUi();
-              await refresh();
-              showToast(t("toastResolved"));
+              try {
+                await db.updateDebt(id, { check_content: checkHtml });
+                await dig.settleDig(id);
+                await db.resolveDebt(id, checkExcerpt(checkHtml) || t("checkFallback"));
+                dig.clearDigUi();
+                await refresh();
+                showToast(t("toastResolved"));
+              } catch (err) {
+                console.error(err);
+                showToast(t("toastSaveFailed"));
+              }
             }}
             onReopen={async (id) => {
               await db.reopenDebt(id);
@@ -334,6 +351,11 @@ export default function App() {
             }}
             onEvict={evict}
             onDelete={async (id) => {
+              try {
+                await flushDetailRef.current?.();
+              } catch {
+                /* delete with whatever is already saved */
+              }
               await dig.settleDig(id);
               await db.deleteDebt(id);
               setSelectedId(null);
@@ -349,8 +371,9 @@ export default function App() {
           minutesSpent={dig.digMinutesSpent}
           expired={dig.digExpired}
           onResolve={dig.resolveDig}
-          onNeedCheck={dig.needCheckFromModal}
           onReturn={dig.closeDig}
+          onKeepDigging={dig.extendDig}
+          onDismiss={dig.resumeDig}
         />
       )}
 

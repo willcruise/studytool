@@ -13,8 +13,6 @@ export default function DigWidget() {
   const [debt, setDebt] = useState<Debt | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const busy = useRef(false);
-  const sawFocus = useRef(false);
-  const dismissArmed = useRef(false);
 
   const send = async (event: "dig-dock" | "dig-finish-early") => {
     if (busy.current) return;
@@ -23,7 +21,11 @@ export default function DigWidget() {
       await emit(event);
       await getCurrentWindow().hide();
     } catch {
-      busy.current = false;
+      /* unlock immediately so a failed click can retry */
+    } finally {
+      window.setTimeout(() => {
+        busy.current = false;
+      }, 400);
     }
   };
 
@@ -40,21 +42,13 @@ export default function DigWidget() {
   }, []);
 
   useEffect(() => {
+    busy.current = false;
+  }, [debt?.id]);
+
+  useEffect(() => {
     const win = getCurrentWindow();
     const unmoved = win.onMoved(({ payload }) => {
       rememberDigWindowPos(payload.x, payload.y);
-    });
-    const unfocus = win.onFocusChanged(({ payload: focused }) => {
-      if (focused) {
-        sawFocus.current = true;
-        dismissArmed.current = false;
-        window.setTimeout(() => {
-          dismissArmed.current = true;
-        }, 400);
-        return;
-      }
-      if (!sawFocus.current || !dismissArmed.current || busy.current) return;
-      void dock();
     });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") void dock();
@@ -62,7 +56,6 @@ export default function DigWidget() {
     window.addEventListener("keydown", onKey);
     return () => {
       unmoved.then((fn) => fn());
-      unfocus.then((fn) => fn());
       window.removeEventListener("keydown", onKey);
     };
   }, []);

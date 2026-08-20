@@ -16,6 +16,14 @@ export function htmlToText(html: string | null | undefined): string {
   const s = html ?? "";
   if (!s.trim()) return "";
   return s
+    .replace(/<(?:span|div)[^>]*\bdata-latex="([^"]*)"[^>]*>/gi, (_m, latex: string) => {
+      return ` ${latex
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&")} `;
+    })
     .replace(/<img\b[^>]*>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")

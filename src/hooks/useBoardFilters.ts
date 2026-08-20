@@ -11,6 +11,7 @@ import {
 
 export function useBoardFilters(allDebts: Debt[], activeSession: Session | null) {
   const [query, setQuery] = useState("");
+  const [archiveQuery, setArchiveQuery] = useState("");
   const [archiveFilter, setArchiveFilter] = useState<"resolved" | "evicted">("resolved");
   const [sessionOnly, setSessionOnly] = useState(true);
   const [showRam, setShowRam] = useState(false);
@@ -31,8 +32,8 @@ export function useBoardFilters(allDebts: Debt[], activeSession: Session | null)
   );
   const dueChecks = useMemo(() => dueCheckDebts(resolvedDebts), [resolvedDebts]);
   const archiveItems = useMemo(
-    () => archiveDebts(resolvedDebts, evictedDebts, archiveFilter, query),
-    [archiveFilter, resolvedDebts, evictedDebts, query]
+    () => archiveDebts(resolvedDebts, evictedDebts, archiveFilter, archiveQuery),
+    [archiveFilter, resolvedDebts, evictedDebts, archiveQuery]
   );
 
   const selectTier = (tier: Tier) => {
@@ -67,6 +68,8 @@ export function useBoardFilters(allDebts: Debt[], activeSession: Session | null)
   return {
     query,
     setQuery,
+    archiveQuery,
+    setArchiveQuery,
     archiveFilter,
     setArchiveFilter,
     sessionOnly,

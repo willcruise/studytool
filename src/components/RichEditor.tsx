@@ -1,13 +1,16 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import Link from "@tiptap/extension-link";
+import { BlockMath, InlineMath } from "@tiptap/extension-mathematics";
 import type { Editor } from "@tiptap/react";
+import type { Node as PmNode } from "@tiptap/pm/model";
 import { ingestImageFile, setImageSink, clearImageSink, type StoredImage } from "../images";
 import { LocalImage, withLiveImageSrc } from "../localImage";
 import { toEditorHtml } from "../richtext";
 import { useI18n } from "../i18n";
+import "katex/dist/katex.min.css";
 
 interface Props {
   debtId: number;
@@ -30,6 +33,12 @@ function insertStoredImage(editor: Editor, img: StoredImage) {
     })
     .run();
 }
+
+type MathEdit = {
+  mode: "inline" | "block";
+  pos: number;
+  latex: string;
+};
 
 export interface RichEditorHandle {
   selectedText: () => string;
@@ -58,6 +67,13 @@ export const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEdito
   const insertRef = useRef<(files: File[]) => Promise<void>>(async () => {});
   const owner = useRef(Symbol("editor"));
   const editorRef = useRef<Editor | null>(null);
+  const [mathEdit, setMathEdit] = useState<MathEdit | null>(null);
+  const openMathRef = useRef<(mode: MathEdit["mode"], pos: number, latex: string) => void>(() => {});
+  openMathRef.current = (mode, pos, latex) => setMathEdit({ mode, pos, latex });
+
+  const onMathClick = (mode: MathEdit["mode"]) => (node: PmNode, pos: number) => {
+    openMathRef.current(mode, pos, String(node.attrs.latex ?? ""));
+  };
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -78,6 +94,14 @@ export const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEdito
       }),
       Placeholder.configure({ placeholder }),
       Link.configure({ openOnClick: false, autolink: true }),
+      InlineMath.configure({
+        onClick: onMathClick("inline"),
+        katexOptions: { throwOnError: false, displayMode: false },
+      }),
+      BlockMath.configure({
+        onClick: onMathClick("block"),
+        katexOptions: { throwOnError: false, displayMode: true },
+      }),
     ],
     content: withLiveImageSrc(toEditorHtml(html)),
     editorProps: {
@@ -128,6 +152,40 @@ export const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEdito
     onUpdate: ({ editor: ed }) => onChangeRef.current(ed.getHTML()),
   });
   editorRef.current = editor;
+
+  const commitMath = () => {
+    if (!editor || !mathEdit) return;
+    const latex = mathEdit.latex.trim();
+    const { mode, pos } = mathEdit;
+    const node = editor.state.doc.nodeAt(pos);
+    const name = mode === "inline" ? "inlineMath" : "blockMath";
+    const existing = node?.type.name === name;
+    if (!latex) {
+      if (existing) {
+        if (mode === "inline") editor.commands.deleteInlineMath({ pos });
+        else editor.commands.deleteBlockMath({ pos });
+      }
+      setMathEdit(null);
+      editor.commands.focus();
+      return;
+    }
+    if (existing) {
+      if (mode === "inline") editor.commands.updateInlineMath({ latex, pos });
+      else editor.commands.updateBlockMath({ latex, pos });
+    } else if (mode === "inline") {
+      editor.commands.insertInlineMath({ latex, pos });
+    } else {
+      editor.commands.insertBlockMath({ latex, pos });
+    }
+    setMathEdit(null);
+    editor.commands.focus();
+  };
+
+  const startMath = (mode: MathEdit["mode"]) => {
+    if (!editor) return;
+    const pos = editor.state.selection.from;
+    setMathEdit({ mode, pos, latex: "" });
+  };
 
   useImperativeHandle(
     ref,
@@ -225,6 +283,26 @@ export const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEdito
         >
           1.
         </button>
+        <button
+          type="button"
+          tabIndex={-1}
+          className={mathEdit?.mode === "inline" ? "on" : ""}
+          title={t("mathInlineHint")}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => startMath("inline")}
+        >
+          ∑
+        </button>
+        <button
+          type="button"
+          tabIndex={-1}
+          className={mathEdit?.mode === "block" ? "on" : ""}
+          title={t("mathBlockHint")}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => startMath("block")}
+        >
+          ∑∑
+        </button>
         <label className="rich-upload" title={t("photo")}>
           {t("photo")}
           <input
@@ -257,6 +335,32 @@ export const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEdito
           )
         )}
       </div>
+      {mathEdit && (
+        <div className="math-edit">
+          <span className="math-edit-label">{mathEdit.mode === "block" ? t("mathBlock") : t("math")}</span>
+          <input
+            autoFocus
+            className="math-edit-input"
+            placeholder={t("mathPlaceholder")}
+            value={mathEdit.latex}
+            onChange={(e) => setMathEdit({ ...mathEdit, latex: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                commitMath();
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setMathEdit(null);
+                editor.commands.focus();
+              }
+            }}
+          />
+          <button type="button" className="ghost-btn" onClick={commitMath}>
+            {t("done")}
+          </button>
+        </div>
+      )}
       <EditorContent editor={editor} />
     </div>
   );

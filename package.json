@@ -21,11 +21,13 @@
     "@tauri-apps/plugin-sql": "^2.4.0",
     "@tiptap/extension-image": "^3.30.2",
     "@tiptap/extension-link": "^3.30.2",
+    "@tiptap/extension-mathematics": "^3.30.2",
     "@tiptap/extension-placeholder": "^3.30.2",
     "@tiptap/pm": "^3.30.2",
     "@tiptap/react": "^3.30.2",
     "@tiptap/starter-kit": "^3.30.2",
     "force-graph": "^1.51.4",
+    "katex": "^0.18.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

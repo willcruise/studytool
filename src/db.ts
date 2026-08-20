@@ -81,6 +81,12 @@ export async function getActiveDig(): Promise<Debt | null> {
   return rows[0] ?? null;
 }
 
+export async function getDebt(id: number): Promise<Debt | null> {
+  const d = await getDb();
+  const rows = await d.select<Debt[]>(`${DEBT_SELECT} WHERE d.id = $1`, [id]);
+  return rows[0] ?? null;
+}
+
 export async function createDebt(input: {
   title: string;
   tier?: Tier;
@@ -236,6 +242,24 @@ export async function startDig(id: number, minutes: number): Promise<void> {
   );
 }
 
+export async function extendDig(id: number, minutes: number): Promise<void> {
+  const d = await getDb();
+  await d.execute(
+    `UPDATE debts SET
+       dig_until = datetime(
+         CASE
+           WHEN dig_until IS NOT NULL AND dig_until > datetime('now')
+           THEN dig_until
+           ELSE datetime('now')
+         END,
+         '+' || $1 || ' minutes'
+       ),
+       last_touched = datetime('now')
+     WHERE id = $2 AND dig_until IS NOT NULL`,
+    [String(minutes), id]
+  );
+}
+
 export async function endDig(id: number, minutesSpent: number): Promise<void> {
   const d = await getDb();
   await d.execute(
@@ -356,29 +380,50 @@ export async function listGraphEdges(graphId: number): Promise<GraphEdge[]> {
 
 export async function addGraphEdge(
   graphId: number,
-  a: number,
-  b: number
+  from: number,
+  to: number
 ): Promise<void> {
+  if (from === to) return;
   const d = await getDb();
-  // store edges in canonical order so duplicates in either direction are rejected
-  const [lo, hi] = a < b ? [a, b] : [b, a];
   await d.execute(
     "INSERT OR IGNORE INTO graph_edges (graph_id, a_debt, b_debt) VALUES ($1, $2, $3)",
-    [graphId, lo, hi]
+    [graphId, from, to]
   );
 }
 
 export async function removeGraphEdge(
   graphId: number,
-  a: number,
-  b: number
+  from: number,
+  to: number
 ): Promise<void> {
   const d = await getDb();
-  const [lo, hi] = a < b ? [a, b] : [b, a];
   await d.execute(
     "DELETE FROM graph_edges WHERE graph_id = $1 AND a_debt = $2 AND b_debt = $3",
-    [graphId, lo, hi]
+    [graphId, from, to]
   );
+}
+
+/** Parent → child on every graph the parent already sits on, or a new graph named after the parent. */
+export async function recordSplitGraph(
+  parentId: number,
+  childId: number,
+  parentTitle: string
+): Promise<void> {
+  const d = await getDb();
+  let graphs = await d.select<{ graph_id: number }[]>(
+    "SELECT graph_id FROM graph_nodes WHERE debt_id = $1",
+    [parentId]
+  );
+  if (graphs.length === 0) {
+    const name = parentTitle.replace(/\s+/g, " ").trim().slice(0, 80) || t("split");
+    const graphId = await createGraph(name);
+    await addGraphNode(graphId, parentId);
+    graphs = [{ graph_id: graphId }];
+  }
+  for (const { graph_id } of graphs) {
+    await addGraphNode(graph_id, childId);
+    await addGraphEdge(graph_id, parentId, childId);
+  }
 }
 
 // ---------- stats ----------

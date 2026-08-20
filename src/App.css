@@ -1574,6 +1574,81 @@ body {
   transform: translate(40%, 40%);
 }
 
+.tiptap-mathematics-render {
+  color: var(--text);
+  cursor: pointer;
+}
+
+.tiptap-mathematics-render .katex {
+  color: inherit;
+}
+
+.tiptap-mathematics-render--editable:hover {
+  outline: 1px dashed var(--border);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.tiptap-mathematics-render[data-type="inline-math"] {
+  display: inline-block;
+  padding: 0 2px;
+}
+
+.tiptap-mathematics-render[data-type="block-math"] {
+  display: block;
+  text-align: center;
+  padding: 10px 8px;
+  margin: 6px 0;
+  overflow-x: auto;
+}
+
+.inline-math-error,
+.block-math-error {
+  color: var(--red);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.math-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.math-edit-label {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.math-edit-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+.math-edit-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.math-edit .ghost-btn {
+  flex-shrink: 0;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .writer-backdrop {
   position: fixed;
   inset: 0;
@@ -1618,6 +1693,10 @@ body {
 
 .writer-header h3 {
   font-size: 16px;
+}
+
+.writer-header .primary-btn {
+  flex-shrink: 0;
 }
 
 .writer-hint {

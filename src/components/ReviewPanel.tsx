@@ -153,8 +153,10 @@ export function ReviewPanel({
             </div>
             <div className="review-actions">
               <button
+                type="button"
                 className="dig-start-btn"
                 disabled={digActive}
+                title={digActive ? t("toastDigBusy") : undefined}
                 onClick={() => onStartDig(debt.id, 30)}
               >
                 ⛏ {t("minutes", { n: 30 })}
@@ -176,9 +178,12 @@ export function ReviewPanel({
               <span className="debt-title">{d.title}</span>
               <span className="gc-age">{t("idleDays", { n: Math.floor(daysSince(d.last_touched)) })}</span>
             </div>
-            <button className="ghost-btn" onClick={() => onEvict(d.id)}>
-              {t("evict")}
-            </button>
+            <ConfirmButton
+              label={t("evict")}
+              confirmLabel={t("evictConfirm")}
+              className="ghost-btn"
+              onConfirm={() => onEvict(d.id)}
+            />
           </div>
         ))}
         {gc.length > 1 && (

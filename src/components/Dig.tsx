@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Debt } from "../types";
-import { checkIsReady } from "../richtext";
 import { fmtCountdown, parseUtc } from "../time";
 import { handleTextareaTab } from "../keys";
 import { useI18n } from "../i18n";
+
+const DIG_MINUTES = [15, 30, 60] as const;
 
 // ---------- top bar shown while a dig is running ----------
 
@@ -51,8 +52,9 @@ interface ModalProps {
   minutesSpent: number;
   expired: boolean;
   onResolve: () => void;
-  onNeedCheck: () => void;
   onReturn: (log: string) => void;
+  onKeepDigging: (minutes: number) => void;
+  onDismiss: () => void;
 }
 
 export function DigEndModal({
@@ -60,16 +62,35 @@ export function DigEndModal({
   minutesSpent,
   expired,
   onResolve,
-  onNeedCheck,
   onReturn,
+  onKeepDigging,
+  onDismiss,
 }: ModalProps) {
   const { t } = useI18n();
-  const [mode, setMode] = useState<"choose" | "return">("choose");
+  const [mode, setMode] = useState<"choose" | "return" | "extend">("choose");
   const [text, setText] = useState("");
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (mode === "choose") {
+        if (!expired) onDismiss();
+        return;
+      }
+      setMode("choose");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expired, mode, onDismiss]);
+
   return (
-    <div className="modal-backdrop">
-      <div className="modal">
+    <div
+      className="modal-backdrop"
+      onClick={() => {
+        if (mode === "choose" && !expired) onDismiss();
+      }}
+    >
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3 className="modal-title">
           {expired ? t("timeboxEnded") : t("digWrapup")} — {debt.title}
         </h3>
@@ -77,19 +98,39 @@ export function DigEndModal({
 
         {mode === "choose" && (
           <div className="modal-choices">
-            <button
-              className="primary-btn"
-              onClick={() => {
-                if (checkIsReady(debt.check_content)) onResolve();
-                else onNeedCheck();
-              }}
-            >
+            <button type="button" className="primary-btn" onClick={() => onResolve()}>
               {t("understoodResolve")}
             </button>
-            <button className="ghost-btn" onClick={() => setMode("return")}>
+            <button type="button" className="ghost-btn" onClick={() => setMode("return")}>
               {t("notYetReturn")}
             </button>
+            <button type="button" className="ghost-btn" onClick={() => setMode("extend")}>
+              {t("keepDigging")}
+            </button>
           </div>
+        )}
+
+        {mode === "extend" && (
+          <>
+            <label className="detail-label">{t("keepDigging")}</label>
+            <div className="detail-actions">
+              {DIG_MINUTES.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className="dig-start-btn"
+                  onClick={() => onKeepDigging(m)}
+                >
+                  ⛏ {t("minutes", { n: m })}
+                </button>
+              ))}
+            </div>
+            <div className="detail-actions">
+              <button type="button" className="ghost-btn" onClick={() => setMode("choose")}>
+                {t("back")}
+              </button>
+            </div>
+          </>
         )}
 
         {mode === "return" && (
@@ -103,10 +144,10 @@ export function DigEndModal({
               onKeyDown={(e) => handleTextareaTab(e, text, setText)}
             />
             <div className="detail-actions">
-              <button className="primary-btn" onClick={() => onReturn(text.trim())}>
+              <button type="button" className="primary-btn" onClick={() => onReturn(text.trim())}>
                 {t("returnToStudy")}
               </button>
-              <button className="ghost-btn" onClick={() => setMode("choose")}>
+              <button type="button" className="ghost-btn" onClick={() => setMode("choose")}>
                 {t("back")}
               </button>
             </div>
