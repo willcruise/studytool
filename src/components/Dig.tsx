@@ -17,9 +17,14 @@ interface BarProps {
 
 export function DigBar({ debt, now, onFinishEarly, onFloat }: BarProps) {
   const remaining = parseUtc(debt.dig_until!) - now;
+  const started = debt.dig_started_at ? parseUtc(debt.dig_started_at) : now;
+  const total = Math.max(parseUtc(debt.dig_until!) - started, 1);
+  const elapsed = Math.min(Math.max(total - remaining, 0), total);
   const { t } = useI18n();
+  const urgent = remaining > 0 && remaining <= 60_000;
   return (
-    <div className="dig-bar">
+    <div className={`dig-bar${urgent ? " urgent" : ""}`}>
+      <div className="dig-bar-progress" style={{ width: `${(elapsed / total) * 100}%` }} />
       <span className="dig-pulse" />
       <span className="dig-label">{t("digging")}</span>
       <span className="dig-title">{debt.title}</span>

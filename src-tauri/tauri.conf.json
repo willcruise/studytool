@@ -19,7 +19,7 @@
         "minWidth": 900,
         "minHeight": 600,
         "dragDropEnabled": true,
-        "backgroundColor": "#0e1116",
+        "backgroundColor": "#0b1020",
         "theme": "Dark"
       },
       {
@@ -34,7 +34,7 @@
         "center": true,
         "decorations": false,
         "skipTaskbar": true,
-        "backgroundColor": "#161b22",
+        "backgroundColor": "#131a2e",
         "theme": "Dark"
       },
       {
@@ -49,7 +49,7 @@
         "acceptFirstMouse": true,
         "decorations": false,
         "skipTaskbar": true,
-        "backgroundColor": "#161b22",
+        "backgroundColor": "#131a2e",
         "theme": "Dark"
       }
     ],

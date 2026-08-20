@@ -115,7 +115,12 @@ export function ReviewPanel({
     <div className="review">
       <section className="review-section">
         <h3 className="review-heading">{t("meetAgain")}</h3>
-        {dueChecks.length === 0 && <div className="column-empty">{t("none")}</div>}
+        {dueChecks.length === 0 && (
+          <div className="column-empty">
+            <span className="empty-glyph" aria-hidden="true">↻</span>
+            {t("emptyReviewDue")}
+          </div>
+        )}
         {dueChecks.map((debt) => (
           <div key={debt.id} className="review-card review-check">
             <div className="review-body">
@@ -139,7 +144,12 @@ export function ReviewPanel({
 
       <section className="review-section">
         <h3 className="review-heading">{t("todaySuggest")}</h3>
-        {top.length === 0 && <div className="column-empty">{t("none")}</div>}
+        {top.length === 0 && (
+          <div className="column-empty">
+            <span className="empty-glyph" aria-hidden="true">✦</span>
+            {t("emptyReviewSuggest")}
+          </div>
+        )}
         {top.map(({ debt, reasons }, i) => (
           <div key={debt.id} className="review-card">
             <div className="review-rank">{i + 1}</div>
@@ -171,7 +181,12 @@ export function ReviewPanel({
 
       <section className="review-section">
         <h3 className="review-heading">{t("gcCandidates")}</h3>
-        {gc.length === 0 && <div className="column-empty">{t("none")}</div>}
+        {gc.length === 0 && (
+          <div className="column-empty">
+            <span className="empty-glyph" aria-hidden="true">✧</span>
+            {t("emptyReviewGc")}
+          </div>
+        )}
         {gc.map((d) => (
           <div key={d.id} className="gc-row">
             <div className="gc-body" onClick={() => onSelect(d.id)}>

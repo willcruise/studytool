@@ -61,9 +61,14 @@ export default function DigWidget() {
   }, []);
 
   const remaining = debt?.dig_until ? parseUtc(debt.dig_until) - now : 0;
+  const started = debt?.dig_started_at ? parseUtc(debt.dig_started_at) : now;
+  const total = debt?.dig_until ? Math.max(parseUtc(debt.dig_until) - started, 1) : 1;
+  const elapsed = Math.min(Math.max(total - remaining, 0), total);
+  const urgent = remaining > 0 && remaining <= 60_000;
 
   return (
-    <div className="dig-widget">
+    <div className={`dig-widget${urgent ? " urgent" : ""}`}>
+      <div className="dig-widget-progress" style={{ width: `${(elapsed / total) * 100}%` }} />
       <div className="dig-widget-drag" onMouseDown={startDigWindowDrag}>
         <span className="dig-pulse" />
         <div className="dig-widget-copy">

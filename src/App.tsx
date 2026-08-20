@@ -77,10 +77,11 @@ export default function App() {
   const { activeDig } = dig;
 
   return (
-    <div className="app">
+    <div className={`app${activeDig ? " digging" : ""}`}>
       <header className="header">
         <div className="brand">
-          <span className="brand-mark">◈</span> Study Map
+          <span className="brand-mark">◈</span>
+          <span className="brand-name">Study Map</span>
         </div>
         <SessionPicker
           sessions={data.sessions}
@@ -105,17 +106,21 @@ export default function App() {
         />
         <div className="header-right">
           <div className="stats">
-            <span className="stat-explored">{t("statRepaid", { n: data.stats.resolved })}</span>
-            <span className="stat-sep">·</span>
-            <span className="stat-unexplored">{t("statOpen", { n: data.stats.open })}</span>
+            <span className="stat-pill stat-explored">{t("statRepaid", { n: data.stats.resolved })}</span>
+            <span className="stat-pill stat-unexplored">{t("statOpen", { n: data.stats.open })}</span>
           </div>
           <div className="view-toggle">
             {VIEW_ORDER.map((key) => (
               <button
                 key={key}
-                className={view === key ? "active" : ""}
+                className={`${view === key ? "active" : ""}${
+                  key === "review" && board.dueChecks.length > 0 ? " has-due" : ""
+                }`}
                 onClick={() => setView(key)}
               >
+                <span className="view-ico" aria-hidden="true">
+                  {key === "board" ? "▦" : key === "graph" ? "◎" : key === "review" ? "↻" : "✦"}
+                </span>
                 {key === "review" && board.dueChecks.length > 0
                   ? t("reviewCount", { n: board.dueChecks.length })
                   : t(VIEW_MSG[key])}
@@ -181,7 +186,7 @@ export default function App() {
         </div>
       </header>
 
-      {activeDig && !dig.digModalOpen && !dig.digWindowOn && (
+      {activeDig && !dig.digExpired && !dig.digModalOpen && !dig.digWindowOn && (
         <DigBar
           debt={activeDig}
           now={dig.now}

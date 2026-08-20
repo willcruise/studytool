@@ -50,29 +50,34 @@ export const CaptureBar = forwardRef<HTMLTextAreaElement, Props>(function Captur
 
   return (
     <div className="capture-bar">
-      <textarea
-        ref={(node) => {
-          localRef.current = node;
-          if (typeof ref === "function") ref(node);
-          else if (ref) ref.current = node;
-        }}
-        rows={1}
-        className="capture-input"
-        placeholder={t("capturePlaceholder")}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (handleTextareaTab(e, value, setValue)) return;
-          if (e.key === "Enter" && e.shiftKey) {
-            e.stopPropagation();
-            return;
-          }
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-      />
+      <div className="capture-field">
+        <span className="capture-spark" aria-hidden="true">
+          ✦
+        </span>
+        <textarea
+          ref={(node) => {
+            localRef.current = node;
+            if (typeof ref === "function") ref(node);
+            else if (ref) ref.current = node;
+          }}
+          rows={1}
+          className="capture-input"
+          placeholder={t("capturePlaceholder")}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (handleTextareaTab(e, value, setValue)) return;
+            if (e.key === "Enter" && e.shiftKey) {
+              e.stopPropagation();
+              return;
+            }
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+        />
+      </div>
       <input
         className="board-search"
         placeholder={t("search")}

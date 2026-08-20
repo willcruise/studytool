@@ -43,10 +43,10 @@ export interface Attachment {
 }
 
 export const TIER_META: Record<Tier, { label: string; color: string }> = {
-  inbox: { label: "Inbox", color: "#8b8fa3" },
-  cache: { label: "Cache", color: "#e5534b" },
-  ram: { label: "RAM", color: "#d4a72c" },
-  storage: { label: "Storage", color: "#539bf5" },
+  inbox: { label: "Inbox", color: "#c4b5fd" },
+  cache: { label: "Cache", color: "#fb7185" },
+  ram: { label: "RAM", color: "#fbbf24" },
+  storage: { label: "Storage", color: "#22d3ee" },
 };
 
 export const TIER_ORDER: Tier[] = ["inbox", "cache", "ram", "storage"];

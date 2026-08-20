@@ -15,6 +15,7 @@ export function DebtCard({ debt, selected, onSelect, onMove }: Props) {
   return (
     <div
       className={`debt-card ${selected ? "selected" : ""}`}
+      data-tier={debt.tier}
       onClick={() => onSelect(debt.id)}
     >
       <div className="debt-title">{debt.title}</div>

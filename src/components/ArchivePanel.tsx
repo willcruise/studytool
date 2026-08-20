@@ -51,7 +51,14 @@ export function ArchivePanel({
         />
       </div>
       <div className="resolved-list">
-        {items.length === 0 && <div className="column-empty">{t("none")}</div>}
+        {items.length === 0 && (
+          <div className="column-empty">
+            <span className="empty-glyph" aria-hidden="true">
+              {filter === "resolved" ? "✦" : "◌"}
+            </span>
+            {t(filter === "resolved" ? "emptyArchive" : "emptyArchiveEvicted")}
+          </div>
+        )}
         {items.map((d) => (
           <div
             key={d.id}

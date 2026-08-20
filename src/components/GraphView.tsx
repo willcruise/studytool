@@ -121,17 +121,17 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
   useEffect(() => {
     const el = containerRef.current!;
     const graph = new ForceGraph<GNode, GLink>(el)
-      .backgroundColor("#0e1116")
+      .backgroundColor("#0b1020")
       .nodeId("id")
       .nodeVal("val")
       .nodeLabel("label")
-      .linkColor((l) => (l.manual ? "rgba(83, 155, 245, 0.65)" : "rgba(139, 147, 161, 0.25)"))
+      .linkColor((l) => (l.manual ? "rgba(124, 156, 255, 0.7)" : "rgba(154, 166, 201, 0.28)"))
       .linkWidth((l) => (l.manual ? 1.8 : 1.2))
       .linkLineDash((l) => (l.manual ? null : [2, 2]))
       .linkDirectionalArrowLength((l) => (l.manual ? 6 : 0))
       .linkDirectionalArrowRelPos(1)
       .linkDirectionalArrowColor((l) =>
-        l.manual ? "rgba(83, 155, 245, 0.9)" : "rgba(139, 147, 161, 0.4)"
+        l.manual ? "rgba(124, 156, 255, 0.9)" : "rgba(154, 166, 201, 0.4)"
       )
       .nodeCanvasObject((node, ctx, scale) => {
         const r = node.kind === "session" ? 9 : 5;
@@ -141,7 +141,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
         if (isSelected || isPending) {
           ctx.beginPath();
           ctx.arc(node.x!, node.y!, r + 3, 0, 2 * Math.PI);
-          ctx.strokeStyle = isPending ? "#539bf5" : "#e6e9ef";
+          ctx.strokeStyle = isPending ? "#7c9cff" : "#eef2ff";
           ctx.lineWidth = 1.5;
           if (isPending) ctx.setLineDash([3, 2]);
           ctx.stroke();
@@ -151,7 +151,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
         ctx.beginPath();
         ctx.arc(node.x!, node.y!, r, 0, 2 * Math.PI);
         if (node.resolved) {
-          ctx.fillStyle = "rgba(87, 171, 90, 0.35)";
+          ctx.fillStyle = "rgba(74, 222, 128, 0.35)";
           ctx.fill();
           ctx.strokeStyle = node.color;
           ctx.lineWidth = 1.5;
@@ -166,7 +166,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
           ctx.font = `${node.kind === "session" ? "700 " : ""}${fontSize}px sans-serif`;
           ctx.textAlign = "center";
           ctx.textBaseline = "top";
-          ctx.fillStyle = node.kind === "session" ? "#e6e9ef" : "#8b93a1";
+          ctx.fillStyle = node.kind === "session" ? "#eef2ff" : "#9aa6c9";
           const label = node.label.length > 24 ? node.label.slice(0, 24) + "…" : node.label;
           ctx.fillText(label, node.x!, node.y! + r + 2);
         }
@@ -243,7 +243,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
       kind: "debt",
       debtId: d.id,
       label: d.title,
-      color: d.status === "resolved" ? "#57ab5a" : TIER_META[d.tier].color,
+      color: d.status === "resolved" ? "#4ade80" : TIER_META[d.tier].color,
       val: 3,
       resolved: d.status === "resolved",
     });
@@ -452,7 +452,9 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
 
       {!currentGraph && !creating && (
         <div className="graph-empty">
+          <div className="empty-glyph big" aria-hidden="true">◎</div>
           <p>{t("emptyGraph")}</p>
+          <p className="empty-sub">{t("emptyGraphHint")}</p>
           <button className="primary-btn" onClick={() => setCreating(true)}>
             {t("newGraph")}
           </button>
@@ -461,7 +463,9 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
 
       {currentGraph && nodeIds.length === 0 && !pickerOpen && (
         <div className="graph-empty">
+          <div className="empty-glyph big" aria-hidden="true">◎</div>
           <p>{t("emptyGraph")}</p>
+          <p className="empty-sub">{t("emptyGraphHint")}</p>
           <button className="primary-btn" onClick={() => setPickerOpen(true)}>
             {t("addNode")}
           </button>
@@ -527,7 +531,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
         <span><i style={{ background: TIER_META.ram.color }} /> RAM</span>
         <span><i style={{ background: TIER_META.storage.color }} /> Storage</span>
         <span><i style={{ background: TIER_META.inbox.color }} /> Inbox</span>
-        <span><i style={{ background: "rgba(87,171,90,0.5)", border: "1.5px solid #57ab5a" }} /> {t("legendResolved")}</span>
+        <span><i style={{ background: "rgba(74,222,128,0.5)", border: "1.5px solid #4ade80" }} /> {t("legendResolved")}</span>
       </div>
     </div>
   );

@@ -81,8 +81,12 @@ export function useDigSession({
   }, [digExpired, activeDig?.id]);
 
   useEffect(() => {
+    if (digExpired) setPauseDigModal(false);
+  }, [digExpired]);
+
+  useEffect(() => {
     let cancelled = false;
-    const want = Boolean(activeDig && !digModalOpen && digFloat);
+  const want = Boolean(activeDig && !digExpired && !digModalOpen && digFloat);
     void setDigWindowVisible(want).then((ok) => {
       if (!cancelled) setDigWindowOn(want && ok);
     });
@@ -200,7 +204,7 @@ export function useDigSession({
     if (!checkIsReady(check)) {
       setSelectedId(activeDig.id);
       setForceWriter("check");
-      setPauseDigModal(true);
+      if (!digExpired) setPauseDigModal(true);
       showToast(t("toastNeedCheck"));
       return;
     }
@@ -218,10 +222,9 @@ export function useDigSession({
   };
 
   const resumeDig = () => {
+    if (activeDig !== null && Date.now() >= parseUtc(activeDig.dig_until!)) return;
     setDigFinishRequested(false);
-    const stillRunning =
-      activeDig !== null && Date.now() < parseUtc(activeDig.dig_until!);
-    setPauseDigModal(!stillRunning);
+    setPauseDigModal(false);
   };
 
   const extendDig = async (minutes: number) => {
