@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Debt } from "../types";
 import { fmtCountdown, parseUtc } from "../time";
 import { handleTextareaTab } from "../keys";
+import { ConfirmButton } from "./ConfirmButton";
 import { useI18n } from "../i18n";
 
 const DIG_MINUTES = [15, 30, 60] as const;
@@ -105,9 +106,12 @@ export function DigEndModal({
 
         {mode === "choose" && (
           <div className="modal-choices">
-            <button type="button" className="primary-btn" onClick={() => onResolve()}>
-              {t("understoodResolve")}
-            </button>
+            <ConfirmButton
+              label={t("understoodResolve")}
+              confirmLabel={t("resolveConfirm")}
+              className="primary-btn"
+              onConfirm={() => onResolve()}
+            />
             <button type="button" className="ghost-btn" onClick={() => setMode("return")}>
               {t("notYetReturn")}
             </button>

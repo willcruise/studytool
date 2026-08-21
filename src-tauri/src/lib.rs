@@ -320,9 +320,11 @@ pub fn run() {
 
 fn paint_dark_windows(app: &tauri::AppHandle) {
     let dark = tauri::window::Color(0x0e, 0x11, 0x16, 255);
+    let clear = tauri::window::Color(0, 0, 0, 0);
     for label in ["main", "quick", "dig"] {
         if let Some(window) = app.get_webview_window(label) {
-            let _ = window.set_background_color(Some(dark));
+            let color = if label == "dig" { clear } else { dark };
+            let _ = window.set_background_color(Some(color));
         }
     }
 }

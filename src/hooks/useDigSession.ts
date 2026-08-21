@@ -126,21 +126,6 @@ export function useDigSession({
     });
   }, []);
 
-  useEffect(() => {
-    if (!digWindowOn) return;
-    const armedAt = Date.now() + 400;
-    const dock = () => {
-      if (Date.now() < armedAt) return;
-      // Defer so the originating click (Repay, Finish now, …) still fires.
-      window.setTimeout(() => {
-        setDigFloat(false);
-        void setDigWindowVisible(false).then(() => setDigWindowOn(false));
-      }, 0);
-    };
-    window.addEventListener("pointerdown", dock);
-    return () => window.removeEventListener("pointerdown", dock);
-  }, [digWindowOn]);
-
   const startDig = async (id: number, minutes: number) => {
     if (startingRef.current || openDebts.some((d) => d.dig_until !== null)) {
       showToast(t("toastDigBusy"));

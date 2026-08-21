@@ -442,6 +442,33 @@ export async function removeGraphEdgeById(id: number): Promise<void> {
   await d.execute("DELETE FROM graph_edges WHERE id = $1", [id]);
 }
 
+export async function pasteGraphComponent(
+  destId: number,
+  clip: {
+    nodes: number[];
+    edges: { a_debt: number; b_debt: number; directed: boolean; label: string }[];
+  }
+): Promise<{ nodes: number; edges: number }> {
+  let nodes = 0;
+  let edges = 0;
+  const existing = new Set(await listGraphNodeIds(destId));
+  for (const id of clip.nodes) {
+    if (existing.has(id)) continue;
+    await addGraphNode(destId, id);
+    existing.add(id);
+    nodes++;
+  }
+  for (const e of clip.edges) {
+    if (!existing.has(e.a_debt) || !existing.has(e.b_debt)) continue;
+    const ok = await addGraphEdge(destId, e.a_debt, e.b_debt, {
+      directed: e.directed,
+      label: e.label,
+    });
+    if (ok) edges++;
+  }
+  return { nodes, edges };
+}
+
 /** Parent → child on every graph the parent already sits on, or a new graph named after the parent. */
 export async function recordSplitGraph(
   parentId: number,

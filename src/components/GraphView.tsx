@@ -31,6 +31,52 @@ function isDirected(e: { directed?: number | boolean }): boolean {
   return Number(e.directed) === 1 || e.directed === true;
 }
 
+type GraphClip = {
+  nodes: number[];
+  edges: { a_debt: number; b_debt: number; directed: boolean; label: string }[];
+};
+
+/** Survives graph switches so you can copy a component on one map and paste it onto another. */
+let graphClip: GraphClip | null = null;
+
+function componentOf(start: number, nodeIds: number[], edges: GraphEdge[]): GraphClip {
+  const idSet = new Set(nodeIds);
+  if (!idSet.has(start)) return { nodes: [], edges: [] };
+  const adj = new Map<number, number[]>();
+  for (const id of nodeIds) adj.set(id, []);
+  for (const e of edges) {
+    if (!idSet.has(e.a_debt) || !idSet.has(e.b_debt)) continue;
+    adj.get(e.a_debt)!.push(e.b_debt);
+    adj.get(e.b_debt)!.push(e.a_debt);
+  }
+  const seen = new Set<number>();
+  const stack = [start];
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (seen.has(n)) continue;
+    seen.add(n);
+    for (const m of adj.get(n) ?? []) stack.push(m);
+  }
+  return {
+    nodes: [...seen],
+    edges: edges
+      .filter((e) => seen.has(e.a_debt) && seen.has(e.b_debt))
+      .map((e) => ({
+        a_debt: e.a_debt,
+        b_debt: e.b_debt,
+        directed: isDirected(e),
+        label: e.label ?? "",
+      })),
+  };
+}
+
+function isTypingTarget(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  return el.isContentEditable;
+}
+
 function shortTitle(title: string, n = 18): string {
   const t = title.replace(/\s+/g, " ").trim();
   return t.length > n ? t.slice(0, n) + "…" : t;
@@ -53,6 +99,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
   const [nodeIds, setNodeIds] = useState<number[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [hasClip, setHasClip] = useState(() => graphClip !== null);
   const [pickerTier, setPickerTier] = useState<Tier | "all">("all");
   const [linkMode, setLinkMode] = useState(false);
   const [pendingLink, setPendingLink] = useState<number | null>(null);
@@ -72,6 +119,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
   const pendingRef = useRef(pendingLink);
   const selectedEdgeRef = useRef(selectedEdge);
   const edgesRef = useRef(edges);
+  const componentRef = useRef<Set<number>>(new Set());
   const toastRef = useRef(showToast);
   const tRef = useRef(t);
   selectedRef.current = selectedId;
@@ -98,7 +146,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
     }
   }, []);
 
-  const topologyKey = debts.map((d) => `${d.id}:${d.parent_id ?? ""}`).join(",");
+  const topologyKey = debts.map((d) => d.id).join(",");
 
   useEffect(() => {
     void loadGraphs();
@@ -191,6 +239,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
         const r = node.kind === "session" ? 9 : 5;
         const isSelected = node.debtId != null && node.debtId === selectedRef.current;
         const isPending = node.debtId != null && node.debtId === pendingRef.current;
+        const inComponent = node.debtId != null && componentRef.current.has(node.debtId);
 
         if (isSelected || isPending) {
           ctx.beginPath();
@@ -200,6 +249,12 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
           if (isPending) ctx.setLineDash([3, 2]);
           ctx.stroke();
           ctx.setLineDash([]);
+        } else if (inComponent) {
+          ctx.beginPath();
+          ctx.arc(node.x!, node.y!, r + 3, 0, 2 * Math.PI);
+          ctx.strokeStyle = "rgba(238, 242, 255, 0.35)";
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
         }
 
         ctx.beginPath();
@@ -347,6 +402,16 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
   }, [debts, currentGraphId, nodeIds, edges]);
 
   useEffect(() => {
+    if (selectedId == null) {
+      componentRef.current = new Set();
+    } else {
+      componentRef.current = new Set(componentOf(selectedId, nodeIds, edges).nodes);
+    }
+    const g = graphRef.current;
+    if (g) g.graphData(g.graphData());
+  }, [selectedId, nodeIds, edges]);
+
+  useEffect(() => {
     if (!selectedEdge) return;
     if (!edges.some((e) => e.id === selectedEdge.id)) setSelectedEdge(null);
   }, [edges, selectedEdge]);
@@ -356,6 +421,71 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
     if (!g) return;
     g.graphData(g.graphData());
   }, [selectedEdge?.id]);
+
+  const copyComponent = useCallback(() => {
+    if (currentGraphId === null) {
+      setCreating(true);
+      showToast(t("toastNeedGraph"));
+      return;
+    }
+    if (selectedId == null || !nodeIds.includes(selectedId)) {
+      showToast(t("toastGraphCopyNeedNode"));
+      return;
+    }
+    const clip = componentOf(selectedId, nodeIds, edges);
+    if (clip.nodes.length === 0) {
+      showToast(t("toastGraphCopyNeedNode"));
+      return;
+    }
+    graphClip = clip;
+    setHasClip(true);
+    showToast(t("toastGraphCopied", { n: clip.nodes.length }));
+  }, [currentGraphId, selectedId, nodeIds, edges, showToast, t]);
+
+  const pasteComponent = useCallback(async () => {
+    if (currentGraphId === null) {
+      setCreating(true);
+      showToast(t("toastNeedGraph"));
+      return;
+    }
+    if (!graphClip) {
+      showToast(t("toastGraphPasteEmpty"));
+      return;
+    }
+    const live = new Set(debts.map((d) => d.id));
+    const clip: GraphClip = {
+      nodes: graphClip.nodes.filter((id) => live.has(id)),
+      edges: graphClip.edges.filter((e) => live.has(e.a_debt) && live.has(e.b_debt)),
+    };
+    if (clip.nodes.length === 0) {
+      showToast(t("toastGraphPasteNone"));
+      return;
+    }
+    const result = await db.pasteGraphComponent(currentGraphId, clip);
+    await loadGraphContent(currentGraphId);
+    showToast(
+      result.nodes === 0 && result.edges === 0 ? t("toastGraphPasteNone") : t("toastGraphPasted")
+    );
+  }, [currentGraphId, debts, loadGraphContent, showToast, t]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === "c") {
+        if (selectedId == null || currentGraphId === null || !nodeIds.includes(selectedId)) return;
+        e.preventDefault();
+        copyComponent();
+      } else if (key === "v") {
+        if (!graphClip || currentGraphId === null) return;
+        e.preventDefault();
+        void pasteComponent();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [copyComponent, pasteComponent, selectedId, currentGraphId, nodeIds]);
 
   // ---------- toolbar actions ----------
 
@@ -516,6 +646,22 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
           }}
         >
             {t("linkMode")}
+        </button>
+        <button
+          type="button"
+          className={`ghost-btn ${!currentGraph || selectedId == null || !nodeIdSet.has(selectedId) ? "toolbar-dim" : ""}`}
+          title={t("graphCopyHint")}
+          onClick={copyComponent}
+        >
+          {t("graphCopy")}
+        </button>
+        <button
+          type="button"
+          className={`ghost-btn ${!currentGraph || !hasClip ? "toolbar-dim" : ""}`}
+          title={t("graphPasteHint")}
+          onClick={() => void pasteComponent()}
+        >
+          {t("graphPaste")}
         </button>
         {currentGraph && (
           <ConfirmButton

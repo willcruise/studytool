@@ -20,7 +20,6 @@ export function DebtCard({ debt, selected, onSelect, onMove }: Props) {
     >
       <div className="debt-title">{debt.title}</div>
       <div className="debt-meta">
-        {debt.parent_title && <span className="debt-session">↳ {debt.parent_title}</span>}
         {debt.session_topic && <span className="debt-session">◈ {debt.session_topic}</span>}
         {debt.source_url && <span className="debt-badge">{t("link")}</span>}
         {debt.source_file && <span className="debt-badge">{t("paper")}</span>}

@@ -5,7 +5,6 @@ import type { Tier, View } from "./types";
 import * as db from "./db";
 import { checkExcerpt } from "./richtext";
 import { exportBackup, importBackup } from "./backup";
-import { childrenOf } from "./domain/boardQuery";
 import { useToast } from "./hooks/useToast";
 import { useStudyData } from "./hooks/useStudyData";
 import { useBoardFilters } from "./hooks/useBoardFilters";
@@ -287,9 +286,6 @@ export default function App() {
             digActive={activeDig !== null}
             onStartDig={dig.startDig}
             attachmentsVersion={attachmentsVersion}
-            diggingThis={activeDig?.id === selected.id}
-            childrenDebts={childrenOf(data.allDebts, selected.id)}
-            onSelectRelated={setSelectedId}
             onSplit={async (parentId, title, note) => {
               const parent = data.allDebts.find((d) => d.id === parentId);
               const childId = await db.createDebt({
@@ -297,7 +293,6 @@ export default function App() {
                 note,
                 tier: "cache",
                 sessionId: parent?.session_id ?? data.activeSessionRef.current?.id ?? null,
-                parentId,
               });
               if (childId) {
                 await db.recordSplitGraph(parentId, childId, parent?.title ?? title);

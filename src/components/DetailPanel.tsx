@@ -32,9 +32,6 @@ interface Props {
   onForceWriterHandled?: () => void;
   /** bumped by the parent whenever attachments change externally (e.g. file drop) */
   attachmentsVersion: number;
-  diggingThis?: boolean;
-  childrenDebts: Debt[];
-  onSelectRelated: (id: number) => void;
   onSplit: (parentId: number, title: string, note: string) => void;
   onSaveSourceFile: (id: number, path: string | null) => void;
 }
@@ -59,9 +56,6 @@ export function DetailPanel({
   forceWriter,
   onForceWriterHandled,
   attachmentsVersion,
-  diggingThis = false,
-  childrenDebts,
-  onSelectRelated,
   onSplit,
   onSaveSourceFile,
 }: Props) {
@@ -326,11 +320,6 @@ export function DetailPanel({
         {relativeAge(debt.created_at)}
         {debt.time_spent_min > 0 && <span>{t("exploredMins", { n: debt.time_spent_min })}</span>}
       </div>
-      {debt.parent_id && debt.parent_title && (
-        <button className="parent-chip" onClick={() => onSelectRelated(debt.parent_id!)}>
-          {t("parent", { title: debt.parent_title })}
-        </button>
-      )}
 
       <label className="detail-label">{t("session")}</label>
       <select
@@ -426,8 +415,8 @@ export function DetailPanel({
         </EditorDock>
       </div>
 
-      {debt.status === "open" && diggingThis && (
-        <div className="split-box hot">
+      {debt.status === "open" && (
+        <div className="split-box">
           <label className="detail-label">{t("split")}</label>
           <div className="split-row">
             <input
@@ -449,21 +438,6 @@ export function DetailPanel({
         </div>
       )}
 
-      {childrenDebts.length > 0 && (
-        <div className="child-list">
-          <label className="detail-label">{t("branches", { n: childrenDebts.length })}</label>
-          {childrenDebts.map((c) => (
-            <button key={c.id} className="child-chip" onClick={() => onSelectRelated(c.id)}>
-              <span className="picker-dot" style={{ background: TIER_META[c.tier].color }} />
-              {c.title}
-              {c.status !== "open" && (
-                <span className="child-status">{c.status === "resolved" ? t("done") : t("evicted")}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-
       <div className="detail-field">
         <label className="detail-label">Check</label>
         <EditorDock
@@ -476,9 +450,12 @@ export function DetailPanel({
             <header className="writer-header">
               <h3>Check</h3>
               {debt.status === "open" && (
-                <button type="button" className="primary-btn" onClick={() => void tryResolve()}>
-                  {t("resolve")}
-                </button>
+                <ConfirmButton
+                  label={t("resolve")}
+                  confirmLabel={t("resolveConfirm")}
+                  className="primary-btn"
+                  onConfirm={() => void tryResolve()}
+                />
               )}
             </header>
           }
@@ -548,9 +525,12 @@ export function DetailPanel({
 
       {debt.status === "open" && (
         <div className="detail-actions">
-          <button type="button" className="primary-btn" onClick={() => void tryResolve()}>
-            {t("resolve")}
-          </button>
+          <ConfirmButton
+            label={t("resolve")}
+            confirmLabel={t("resolveConfirm")}
+            className="primary-btn"
+            onConfirm={() => void tryResolve()}
+          />
           <ConfirmButton
             label={t("evict")}
             confirmLabel={t("evictConfirm")}

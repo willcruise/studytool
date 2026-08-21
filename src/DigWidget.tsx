@@ -50,13 +50,8 @@ export default function DigWidget() {
     const unmoved = win.onMoved(({ payload }) => {
       rememberDigWindowPos(payload.x, payload.y);
     });
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") void dock();
-    };
-    window.addEventListener("keydown", onKey);
     return () => {
       unmoved.then((fn) => fn());
-      window.removeEventListener("keydown", onKey);
     };
   }, []);
 

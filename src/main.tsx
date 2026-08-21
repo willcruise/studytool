@@ -8,6 +8,7 @@ import { LocaleProvider } from "./i18n";
 const params = new URLSearchParams(window.location.search);
 const isQuick = params.has("quick");
 const isDig = params.has("dig");
+if (isDig) document.documentElement.classList.add("dig-win");
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

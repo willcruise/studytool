@@ -65,7 +65,6 @@ export async function setDigWindowVisible(visible: boolean): Promise<boolean> {
     if (visible) {
       await placeDigWindow(w);
       await w.show();
-      await w.setFocus();
     } else {
       await w.hide();
     }

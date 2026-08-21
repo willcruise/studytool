@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
@@ -49,7 +50,8 @@
         "acceptFirstMouse": true,
         "decorations": false,
         "skipTaskbar": true,
-        "backgroundColor": "#131a2e",
+        "transparent": true,
+        "shadow": false,
         "theme": "Dark"
       }
     ],
