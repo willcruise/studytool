@@ -4,6 +4,7 @@ import type { Debt, GraphEdge, GraphMeta, Tier } from "../types";
 import { TIER_META, TIER_ORDER } from "../types";
 import * as db from "../db";
 import { ConfirmButton } from "./ConfirmButton";
+import { MoreMenu } from "./MoreMenu";
 import { useI18n } from "../i18n";
 
 interface GNode {
@@ -664,16 +665,19 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
           {t("graphPaste")}
         </button>
         {currentGraph && (
-          <ConfirmButton
-            label={t("deleteGraph")}
-            confirmLabel={t("confirmDelete")}
-            onConfirm={async () => {
-              await db.deleteGraph(currentGraph.id);
-              setCurrentGraphId(null);
-              await loadGraphs();
-              showToast(t("toastGraphDeleted", { name: currentGraph.name }));
-            }}
-          />
+          <MoreMenu>
+            <ConfirmButton
+              label={t("deleteGraph")}
+              confirmLabel={t("confirmDelete")}
+              className="more-menu-item"
+              onConfirm={async () => {
+                await db.deleteGraph(currentGraph.id);
+                setCurrentGraphId(null);
+                await loadGraphs();
+                showToast(t("toastGraphDeleted", { name: currentGraph.name }));
+              }}
+            />
+          </MoreMenu>
         )}
       </div>
 

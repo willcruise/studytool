@@ -366,6 +366,15 @@ export default function App() {
         )}
       </main>
 
+      {dropActive && (
+        <div className="drop-overlay">
+          <div className="drop-overlay-text">
+            {selectedId !== null ? t("dropHere") : t("dropInbox")}
+          </div>
+        </div>
+      )}
+
+      <div id="writer-layer" className="writer-layer" />
       {dig.digModalOpen && activeDig && (
         <DigEndModal
           debt={activeDig}
@@ -378,16 +387,6 @@ export default function App() {
           onDismiss={dig.resumeDig}
         />
       )}
-
-      {dropActive && (
-        <div className="drop-overlay">
-          <div className="drop-overlay-text">
-            {selectedId !== null ? t("dropHere") : t("dropInbox")}
-          </div>
-        </div>
-      )}
-
-      <div id="writer-layer" className="writer-layer" />
       {toast && <div className="toast">{toast}</div>}
     </div>
   );

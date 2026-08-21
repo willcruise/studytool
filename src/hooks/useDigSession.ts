@@ -5,7 +5,7 @@ import type { Debt } from "../types";
 import * as db from "../db";
 import { checkExcerpt, checkIsReady } from "../richtext";
 import { minutesBetween, parseUtc } from "../time";
-import { notify } from "../notify";
+import { chimeInApp, ensureNotifyPermission, notify, unlockAlertSound } from "../notify";
 import type { TFn } from "../i18n";
 import {
   digFloatEnabled,
@@ -72,13 +72,15 @@ export function useDigSession({
   useEffect(() => {
     if (digExpired && activeDig && !digNotifiedRef.current) {
       digNotifiedRef.current = true;
-      notify(t("timeboxEnded"), activeDig.title);
+      chimeInApp();
+      showToast(t("toastTimeboxEnded", { title: activeDig.title }));
+      void notify(t("timeboxEnded"), activeDig.title);
       void getCurrentWindow()
         .show()
         .then(() => getCurrentWindow().setFocus());
     }
     if (!digExpired) digNotifiedRef.current = false;
-  }, [digExpired, activeDig?.id]);
+  }, [digExpired, activeDig?.id, showToast, t]);
 
   useEffect(() => {
     if (digExpired) setPauseDigModal(false);
@@ -133,6 +135,8 @@ export function useDigSession({
     }
     startingRef.current = true;
     try {
+      unlockAlertSound();
+      void ensureNotifyPermission();
       await db.startDig(id, minutes);
       setDigFinishRequested(false);
       setPauseDigModal(false);

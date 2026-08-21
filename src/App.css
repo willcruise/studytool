@@ -1201,7 +1201,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
+  z-index: 460;
   animation: fade-in 0.18s ease;
 }
 
@@ -1277,6 +1277,10 @@ body {
   height: 18px;
   background: var(--border);
   margin: 0 2px;
+}
+
+.graph-toolbar .more-menu {
+  margin-left: auto;
 }
 
 .graph-name-btn {
@@ -1793,6 +1797,7 @@ body {
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-raised);
+  flex-shrink: 0;
 }
 
 .rich-toolbar button,
@@ -1833,10 +1838,14 @@ body {
   display: block;
 }
 
-.rich-prose {
+.rich-body {
   min-height: 110px;
   max-height: 220px;
   overflow-y: auto;
+}
+
+.rich-prose {
+  min-height: 110px;
   padding: 10px 12px;
   outline: none;
   font-size: 13px;
@@ -1846,8 +1855,7 @@ body {
 }
 
 .writer-layer .rich-editor.expanded .rich-prose {
-  min-height: 0;
-  max-height: none;
+  min-height: 100%;
   font-size: 16px;
   line-height: 1.7;
   padding: 18px 22px;
@@ -1989,6 +1997,7 @@ body {
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
+  flex-shrink: 0;
 }
 
 .math-edit-label {
@@ -2073,9 +2082,12 @@ body {
   min-height: 0;
 }
 
-.writer-layer .editor-dock.open .rich-prose {
+.writer-layer .editor-dock.open .rich-body {
   flex: 1;
   min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .writer-header {
@@ -2085,6 +2097,7 @@ body {
   gap: 16px;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .writer-header h3 {

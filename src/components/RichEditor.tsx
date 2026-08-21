@@ -361,7 +361,7 @@ export const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEdito
           </button>
         </div>
       )}
-      <EditorContent editor={editor} />
+      <EditorContent editor={editor} className="rich-body" />
     </div>
   );
 });
