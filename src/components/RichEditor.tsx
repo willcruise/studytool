@@ -319,8 +319,13 @@ export const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEdito
           />
         </label>
         {expanded && onCollapse ? (
-          <button type="button" tabIndex={-1} className="rich-expand" onClick={onCollapse}>
-            {t("done")}
+          <button type="button" tabIndex={-1} className="rich-expand" onClick={onCollapse} title={t("collapse")} aria-label={t("collapse")}>
+            <svg className="rich-expand-icon" viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M6 2v4H2V4.5h2.5V2H6zm8 2.5h-2.5V2H10v4h4V4.5zM4.5 11.5H2V10h4v4H4.5v-2.5zM14 10h-4v4h1.5v-2.5H14V10z"
+              />
+            </svg>
           </button>
         ) : (
           onExpand && (
