@@ -12,11 +12,12 @@ const DIG_MINUTES = [15, 30, 60] as const;
 interface BarProps {
   debt: Debt;
   now: number;
+  floating: boolean;
   onFinishEarly: () => void;
   onFloat: () => void;
 }
 
-export function DigBar({ debt, now, onFinishEarly, onFloat }: BarProps) {
+export function DigBar({ debt, now, floating, onFinishEarly, onFloat }: BarProps) {
   const remaining = parseUtc(debt.dig_until!) - now;
   const started = debt.dig_started_at ? parseUtc(debt.dig_started_at) : now;
   const total = Math.max(parseUtc(debt.dig_until!) - started, 1);
@@ -33,14 +34,19 @@ export function DigBar({ debt, now, onFinishEarly, onFloat }: BarProps) {
       <button
         type="button"
         className="ghost-btn"
-        title={t("floatTimer")}
-        aria-label={t("floatTimer")}
+        title={floating ? t("dockTimer") : t("floatTimer")}
+        aria-label={floating ? t("dockTimer") : t("floatTimer")}
+        aria-pressed={floating}
         onClick={onFloat}
       >
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
           <path
             fill="currentColor"
-            d="M6 2h8v8h-2V5.4L5.4 12 4 10.6 10.6 4H6V2zM2 6h2v8h8v2H2V6z"
+            d={
+              floating
+                ? "M3 3h10v2H3V3zm0 3h10v7H3V6zm1.5 1.5v4h7v-4h-7z"
+                : "M6 2h8v8h-2V5.4L5.4 12 4 10.6 10.6 4H6V2zM2 6h2v8h8v2H2V6z"
+            }
           />
         </svg>
       </button>

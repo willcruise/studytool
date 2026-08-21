@@ -185,12 +185,13 @@ export default function App() {
         </div>
       </header>
 
-      {activeDig && !dig.digExpired && !dig.digModalOpen && !dig.digWindowOn && (
+      {activeDig && !dig.digExpired && !dig.digModalOpen && (
         <DigBar
           debt={activeDig}
           now={dig.now}
+          floating={dig.digFloat}
           onFinishEarly={() => void dig.requestFinish()}
-          onFloat={() => dig.setDigFloat(true)}
+          onFloat={() => dig.setDigFloat(!dig.digFloat)}
         />
       )}
 
