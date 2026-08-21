@@ -260,6 +260,19 @@ export async function extendDig(id: number, minutes: number): Promise<void> {
   );
 }
 
+export async function restartDig(id: number, minutes: number, spentSoFar: number): Promise<void> {
+  const d = await getDb();
+  await d.execute(
+    `UPDATE debts SET
+       time_spent_min = time_spent_min + $1,
+       dig_started_at = datetime('now'),
+       dig_until = datetime('now', '+' || $2 || ' minutes'),
+       last_touched = datetime('now')
+     WHERE id = $3 AND dig_until IS NOT NULL`,
+    [Math.max(0, Math.round(spentSoFar)), String(minutes), id]
+  );
+}
+
 export async function endDig(id: number, minutesSpent: number): Promise<void> {
   const d = await getDb();
   await d.execute(
@@ -367,13 +380,13 @@ export async function removeGraphNode(graphId: number, debtId: number): Promise<
 
 export async function listAllGraphEdges(): Promise<GraphEdge[]> {
   const d = await getDb();
-  return d.select<GraphEdge[]>("SELECT a_debt, b_debt FROM graph_edges");
+  return d.select<GraphEdge[]>("SELECT id, a_debt, b_debt, directed, label FROM graph_edges");
 }
 
 export async function listGraphEdges(graphId: number): Promise<GraphEdge[]> {
   const d = await getDb();
   return d.select<GraphEdge[]>(
-    "SELECT a_debt, b_debt FROM graph_edges WHERE graph_id = $1",
+    "SELECT id, a_debt, b_debt, directed, label FROM graph_edges WHERE graph_id = $1",
     [graphId]
   );
 }
@@ -381,26 +394,52 @@ export async function listGraphEdges(graphId: number): Promise<GraphEdge[]> {
 export async function addGraphEdge(
   graphId: number,
   from: number,
-  to: number
+  to: number,
+  opts?: { directed?: boolean; label?: string }
+): Promise<boolean> {
+  if (from === to) return false;
+  const d = await getDb();
+  const existing = await d.select<{ id: number }[]>(
+    `SELECT id FROM graph_edges
+     WHERE graph_id = $1 AND ((a_debt = $2 AND b_debt = $3) OR (a_debt = $3 AND b_debt = $2))`,
+    [graphId, from, to]
+  );
+  if (existing.length > 0) return false;
+  await d.execute(
+    `INSERT INTO graph_edges (graph_id, a_debt, b_debt, directed, label)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [graphId, from, to, opts?.directed ? 1 : 0, opts?.label ?? ""]
+  );
+  return true;
+}
+
+export async function updateGraphEdge(
+  id: number,
+  a: number,
+  b: number,
+  directed: boolean,
+  label: string
 ): Promise<void> {
-  if (from === to) return;
+  if (a === b) return;
   const d = await getDb();
   await d.execute(
-    "INSERT OR IGNORE INTO graph_edges (graph_id, a_debt, b_debt) VALUES ($1, $2, $3)",
+    `UPDATE graph_edges SET a_debt = $1, b_debt = $2, directed = $3, label = $4 WHERE id = $5`,
+    [a, b, directed ? 1 : 0, label.trim(), id]
+  );
+}
+
+export async function removeGraphEdge(graphId: number, from: number, to: number): Promise<void> {
+  const d = await getDb();
+  await d.execute(
+    `DELETE FROM graph_edges
+     WHERE graph_id = $1 AND ((a_debt = $2 AND b_debt = $3) OR (a_debt = $3 AND b_debt = $2))`,
     [graphId, from, to]
   );
 }
 
-export async function removeGraphEdge(
-  graphId: number,
-  from: number,
-  to: number
-): Promise<void> {
+export async function removeGraphEdgeById(id: number): Promise<void> {
   const d = await getDb();
-  await d.execute(
-    "DELETE FROM graph_edges WHERE graph_id = $1 AND a_debt = $2 AND b_debt = $3",
-    [graphId, from, to]
-  );
+  await d.execute("DELETE FROM graph_edges WHERE id = $1", [id]);
 }
 
 /** Parent → child on every graph the parent already sits on, or a new graph named after the parent. */
@@ -422,7 +461,7 @@ export async function recordSplitGraph(
   }
   for (const { graph_id } of graphs) {
     await addGraphNode(graph_id, childId);
-    await addGraphEdge(graph_id, parentId, childId);
+    await addGraphEdge(graph_id, parentId, childId, { directed: true });
   }
 }
 

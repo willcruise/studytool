@@ -68,8 +68,11 @@ export interface GraphMeta {
 }
 
 export interface GraphEdge {
+  id: number;
   a_debt: number;
   b_debt: number;
+  directed: number;
+  label: string;
 }
 
 export interface Stats {

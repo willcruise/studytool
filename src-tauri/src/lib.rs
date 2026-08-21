@@ -250,6 +250,15 @@ pub fn run() {
             "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 7,
+            description: "undirected graph edges with optional name and direction",
+            sql: r#"
+            ALTER TABLE graph_edges ADD COLUMN directed INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE graph_edges ADD COLUMN label TEXT NOT NULL DEFAULT '';
+            "#,
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

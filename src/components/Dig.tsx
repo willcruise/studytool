@@ -59,6 +59,7 @@ interface ModalProps {
   onResolve: () => void;
   onReturn: (log: string) => void;
   onKeepDigging: (minutes: number) => void;
+  onRestartDig: (minutes: number) => void;
   onDismiss: () => void;
 }
 
@@ -69,6 +70,7 @@ export function DigEndModal({
   onResolve,
   onReturn,
   onKeepDigging,
+  onRestartDig,
   onDismiss,
 }: ModalProps) {
   const { t } = useI18n();
@@ -110,21 +112,23 @@ export function DigEndModal({
               {t("notYetReturn")}
             </button>
             <button type="button" className="ghost-btn" onClick={() => setMode("extend")}>
-              {t("keepDigging")}
+              {expired ? t("keepDigging") : t("restartTimebox")}
             </button>
           </div>
         )}
 
         {mode === "extend" && (
           <>
-            <label className="detail-label">{t("keepDigging")}</label>
+            <label className="detail-label">
+              {expired ? t("keepDiggingMore") : t("restartTimebox")}
+            </label>
             <div className="detail-actions">
               {DIG_MINUTES.map((m) => (
                 <button
                   key={m}
                   type="button"
                   className="dig-start-btn"
-                  onClick={() => onKeepDigging(m)}
+                  onClick={() => (expired ? onKeepDigging(m) : onRestartDig(m))}
                 >
                   ⛏ {t("minutes", { n: m })}
                 </button>

@@ -237,6 +237,16 @@ export function useDigSession({
     showToast(t("toastDigMore", { n: minutes }));
   };
 
+  const restartDig = async (minutes: number) => {
+    if (!activeDig) return;
+    await db.restartDig(activeDig.id, minutes, digMinutesSpent);
+    setDigFinishRequested(false);
+    setPauseDigModal(false);
+    setNow(Date.now());
+    await refresh();
+    showToast(t("toastDigRestart", { n: minutes }));
+  };
+
   const clearDigUi = () => {
     setDigFinishRequested(false);
     setPauseDigModal(false);
@@ -259,6 +269,7 @@ export function useDigSession({
     resolveDig,
     resumeDig,
     extendDig,
+    restartDig,
     clearDigUi,
     setDigFinishRequested,
     requestFinish,

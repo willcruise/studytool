@@ -21,7 +21,19 @@ interface GNode {
 interface GLink {
   source: string;
   target: string;
+  edgeId?: number;
   manual?: boolean;
+  directed?: boolean;
+  label?: string;
+}
+
+function isDirected(e: { directed?: number | boolean }): boolean {
+  return Number(e.directed) === 1 || e.directed === true;
+}
+
+function shortTitle(title: string, n = 18): string {
+  const t = title.replace(/\s+/g, " ").trim();
+  return t.length > n ? t.slice(0, n) + "…" : t;
 }
 
 interface Props {
@@ -44,6 +56,8 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
   const [pickerTier, setPickerTier] = useState<Tier | "all">("all");
   const [linkMode, setLinkMode] = useState(false);
   const [pendingLink, setPendingLink] = useState<number | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
+  const [edgeLabel, setEdgeLabel] = useState("");
   const [creating, setCreating] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
   const [newName, setNewName] = useState("");
@@ -56,12 +70,16 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
   const graphIdRef = useRef(currentGraphId);
   const linkModeRef = useRef(linkMode);
   const pendingRef = useRef(pendingLink);
+  const selectedEdgeRef = useRef(selectedEdge);
+  const edgesRef = useRef(edges);
   const toastRef = useRef(showToast);
   const tRef = useRef(t);
   selectedRef.current = selectedId;
   graphIdRef.current = currentGraphId;
   linkModeRef.current = linkMode;
   pendingRef.current = pendingLink;
+  selectedEdgeRef.current = selectedEdge;
+  edgesRef.current = edges;
   toastRef.current = showToast;
   tRef.current = t;
 
@@ -90,6 +108,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
     loadGraphContent(currentGraphId);
     setLinkMode(false);
     setPendingLink(null);
+    setSelectedEdge(null);
     setPickerOpen(false);
   }, [currentGraphId, loadGraphContent]);
 
@@ -105,6 +124,10 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
         setPendingLink(null);
         return;
       }
+      if (selectedEdge !== null) {
+        setSelectedEdge(null);
+        return;
+      }
       if (linkMode) setLinkMode(false);
       if (pickerOpen) setPickerOpen(false);
       if (creating) {
@@ -114,7 +137,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [pendingLink, linkMode, pickerOpen, creating]);
+  }, [pendingLink, selectedEdge, linkMode, pickerOpen, creating]);
 
   // ---------- force-graph instance ----------
 
@@ -125,14 +148,45 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
       .nodeId("id")
       .nodeVal("val")
       .nodeLabel("label")
-      .linkColor((l) => (l.manual ? "rgba(124, 156, 255, 0.7)" : "rgba(154, 166, 201, 0.28)"))
-      .linkWidth((l) => (l.manual ? 1.8 : 1.2))
-      .linkLineDash((l) => (l.manual ? null : [2, 2]))
-      .linkDirectionalArrowLength((l) => (l.manual ? 6 : 0))
-      .linkDirectionalArrowRelPos(1)
-      .linkDirectionalArrowColor((l) =>
-        l.manual ? "rgba(124, 156, 255, 0.9)" : "rgba(154, 166, 201, 0.4)"
+      .linkColor((l) =>
+        l.edgeId != null && l.edgeId === selectedEdgeRef.current?.id
+          ? "rgba(124, 156, 255, 1)"
+          : l.manual
+            ? "rgba(124, 156, 255, 0.7)"
+            : "rgba(154, 166, 201, 0.28)"
       )
+      .linkWidth((l) =>
+        l.edgeId != null && l.edgeId === selectedEdgeRef.current?.id
+          ? 2.6
+          : l.manual
+            ? 1.8
+            : 1.2
+      )
+      .linkLineDash((l) => (l.manual ? null : [2, 2]))
+      .linkDirectionalArrowLength((l) => (l.directed ? 4.5 : 0))
+      .linkDirectionalArrowRelPos(0.92)
+      .linkDirectionalArrowColor((l) =>
+        l.directed ? "rgba(124, 156, 255, 0.9)" : "rgba(154, 166, 201, 0.4)"
+      )
+      .linkCanvasObjectMode((l) => (l.label ? "after" : undefined))
+      .linkCanvasObject((link, ctx, scale) => {
+        const text = link.label?.trim();
+        if (!text) return;
+        const start = link.source;
+        const end = link.target;
+        if (typeof start !== "object" || typeof end !== "object" || start === null || end === null) {
+          return;
+        }
+        const a = start as GNode;
+        const b = end as GNode;
+        if (a.x == null || a.y == null || b.x == null || b.y == null) return;
+        const fontSize = 11 / scale;
+        ctx.font = `${fontSize}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#c5cde6";
+        ctx.fillText(text.length > 28 ? text.slice(0, 28) + "…" : text, (a.x + b.x) / 2, (a.y + b.y) / 2);
+      })
       .nodeCanvasObject((node, ctx, scale) => {
         const r = node.kind === "session" ? 9 : 5;
         const isSelected = node.debtId != null && node.debtId === selectedRef.current;
@@ -179,9 +233,14 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
           if (pending === null) {
             setPendingLink(node.debtId);
           } else if (pending !== node.debtId) {
-            db.addGraphEdge(gid, pending, node.debtId).then(() => {
+            db.addGraphEdge(gid, pending, node.debtId).then((ok) => {
               setPendingLink(null);
+              if (!ok) {
+                toastRef.current(tRef.current("toastAlreadyLinked"));
+                return;
+              }
               loadGraphContent(gid);
+              toastRef.current(tRef.current("toastLinked"));
             });
           } else {
             setPendingLink(null);
@@ -191,22 +250,16 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
         }
       })
       .onLinkClick((link) => {
-        if (!linkModeRef.current) return;
-        const gid = graphIdRef.current;
-        if (gid === null || !link.manual) return;
-        // after layout starts, source/target are node objects; before that, string ids like "d12"
-        const endpointDebtId = (end: GLink["source"]): number | null => {
-          if (typeof end === "object" && end !== null) return (end as GNode).debtId ?? null;
-          if (typeof end === "string" && end.startsWith("d")) return Number(end.slice(1));
-          return null;
-        };
-        const a = endpointDebtId(link.source);
-        const b = endpointDebtId(link.target);
-        if (a == null || b == null) return;
-        db.removeGraphEdge(gid, a, b).then(() => {
-          loadGraphContent(gid);
-          toastRef.current(tRef.current("toastEdgeRemoved"));
-        });
+        if (!link.manual || link.edgeId == null) return;
+        const row = edgesRef.current.find((e) => e.id === link.edgeId);
+        if (!row) return;
+        setPendingLink(null);
+        setSelectedEdge(row);
+        setEdgeLabel(row.label ?? "");
+      })
+      .onBackgroundClick(() => {
+        setPendingLink(null);
+        setSelectedEdge(null);
       })
       .onNodeRightClick((node) => {
         const gid = graphIdRef.current;
@@ -256,10 +309,17 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
       const included = visible.filter((d) => idSet.has(d.id));
       for (const d of included) nodes.push(debtNode(d));
 
-      const directed = new Set(edges.map((e) => `${e.a_debt}-${e.b_debt}`));
+      const linked = new Set(edges.map((e) => `${e.a_debt}-${e.b_debt}`));
       for (const e of edges) {
         if (idSet.has(e.a_debt) && idSet.has(e.b_debt)) {
-          links.push({ source: `d${e.a_debt}`, target: `d${e.b_debt}`, manual: true });
+          links.push({
+            source: `d${e.a_debt}`,
+            target: `d${e.b_debt}`,
+            edgeId: e.id,
+            manual: true,
+            directed: isDirected(e),
+            label: e.label?.trim() || undefined,
+          });
         }
       }
 
@@ -275,7 +335,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
           for (let j = i + 1; j < ids.length; j++) {
             const a = ids[i];
             const b = ids[j];
-            if (!directed.has(`${a}-${b}`) && !directed.has(`${b}-${a}`)) {
+            if (!linked.has(`${a}-${b}`) && !linked.has(`${b}-${a}`)) {
               links.push({ source: `d${a}`, target: `d${b}`, manual: false });
             }
           }
@@ -285,6 +345,17 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
 
     graphRef.current?.graphData({ nodes, links });
   }, [debts, currentGraphId, nodeIds, edges]);
+
+  useEffect(() => {
+    if (!selectedEdge) return;
+    if (!edges.some((e) => e.id === selectedEdge.id)) setSelectedEdge(null);
+  }, [edges, selectedEdge]);
+
+  useEffect(() => {
+    const g = graphRef.current;
+    if (!g) return;
+    g.graphData(g.graphData());
+  }, [selectedEdge?.id]);
 
   // ---------- toolbar actions ----------
 
@@ -318,6 +389,22 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
     setRenaming(false);
     await loadGraphs();
     showToast(t("toastGraphRenamed"));
+  };
+
+  const saveSelectedEdge = async (
+    patch: Partial<Pick<GraphEdge, "a_debt" | "b_debt" | "directed" | "label">>
+  ) => {
+    if (!selectedEdge || currentGraphId === null) return;
+    const next = { ...selectedEdge, ...patch };
+    await db.updateGraphEdge(
+      next.id,
+      next.a_debt,
+      next.b_debt,
+      isDirected(next),
+      next.label ?? ""
+    );
+    setSelectedEdge(next);
+    await loadGraphContent(currentGraphId);
   };
 
   const currentGraph = graphs.find((g) => g.id === currentGraphId) ?? null;
@@ -448,6 +535,92 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
         <div className="graph-hint">
           {pendingLink !== null ? t("secondNode") : t("connectTwo")}
         </div>
+      )}
+
+      {selectedEdge && currentGraph && (
+        <aside className="edge-editor">
+          <div className="edge-editor-header">
+            <span>{t("edgeEdit")}</span>
+            <button type="button" className="ghost-btn" onClick={() => setSelectedEdge(null)}>
+              {t("done")}
+            </button>
+          </div>
+          <label className="detail-label">{t("edgeLabel")}</label>
+          <input
+            className="session-input"
+            value={edgeLabel}
+            placeholder={t("edgeLabel")}
+            onChange={(e) => setEdgeLabel(e.target.value)}
+            onBlur={() => {
+              if (edgeLabel.trim() !== (selectedEdge.label ?? "").trim()) {
+                void saveSelectedEdge({ label: edgeLabel });
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.currentTarget.blur();
+              }
+            }}
+          />
+          <label className="detail-label">{t("edgeDirection")}</label>
+          <div className="edge-dir-line">
+            <button
+              type="button"
+              className={`edge-dir-btn${!isDirected(selectedEdge) ? " on" : ""}`}
+              title={t("edgeUndirected")}
+              aria-label={t("edgeUndirected")}
+              onClick={() => void saveSelectedEdge({ directed: 0 })}
+            >
+              —
+            </button>
+            <button
+              type="button"
+              className={`edge-dir-btn${isDirected(selectedEdge) ? " on" : ""}`}
+              title={t("edgeDirection")}
+              aria-label={t("edgeDirection")}
+              onClick={() => {
+                if (!isDirected(selectedEdge)) {
+                  void saveSelectedEdge({ directed: 1 });
+                  return;
+                }
+                void saveSelectedEdge({
+                  a_debt: selectedEdge.b_debt,
+                  b_debt: selectedEdge.a_debt,
+                  directed: 1,
+                });
+              }}
+            >
+              ⇄
+            </button>
+            <p className="edge-dir-ends">
+              {isDirected(selectedEdge) ? (
+                <>
+                  <span>{shortTitle(debts.find((d) => d.id === selectedEdge.a_debt)?.title ?? "", 22)}</span>
+                  <span className="edge-dir-sign">→</span>
+                  <span>{shortTitle(debts.find((d) => d.id === selectedEdge.b_debt)?.title ?? "", 22)}</span>
+                </>
+              ) : (
+                <>
+                  <span>{shortTitle(debts.find((d) => d.id === selectedEdge.a_debt)?.title ?? "", 22)}</span>
+                  <span className="edge-dir-sign">·</span>
+                  <span>{shortTitle(debts.find((d) => d.id === selectedEdge.b_debt)?.title ?? "", 22)}</span>
+                </>
+              )}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={async () => {
+              await db.removeGraphEdgeById(selectedEdge.id);
+              setSelectedEdge(null);
+              if (currentGraphId !== null) await loadGraphContent(currentGraphId);
+              showToast(t("toastEdgeRemoved"));
+            }}
+          >
+            {t("unlink")}
+          </button>
+        </aside>
       )}
 
       {!currentGraph && !creating && (

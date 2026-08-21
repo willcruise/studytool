@@ -5,6 +5,7 @@ import { listAttachments, removeAttachment } from "../db";
 import { basename, openAttachment } from "../files";
 import { relativeAge } from "../time";
 import { ConfirmButton } from "./ConfirmButton";
+import { EditorDock } from "./EditorDock";
 import { RichEditor, type RichEditorHandle } from "./RichEditor";
 import { autosizeTextarea, handleTextareaTab } from "../keys";
 import { CHECK_MIN_CHARS, checkIsReady } from "../richtext";
@@ -176,6 +177,20 @@ export function DetailPanel({
   useLayoutEffect(() => {
     if (editingTitle) autosizeTextarea(titleRef.current, 160);
   }, [editingTitle, titleValue]);
+
+  useEffect(() => {
+    if (!writer) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.isComposing) return;
+      const el = e.target as HTMLElement | null;
+      if (el?.closest(".math-edit")) return;
+      e.preventDefault();
+      void flushNow(editingIdRef.current);
+      setWriter(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [writer]);
 
   const queueNote = (html: string) => {
     const id = debt.id;
@@ -379,29 +394,36 @@ export function DetailPanel({
         </div>
       ) : null}
 
-      <label className="detail-label">{t("memo")}</label>
-      {writer === "note" && <div className="writer-backdrop" onClick={() => { flush(); setWriter(null); }} />}
-      <div className={`editor-dock ${writer === "note" ? "open" : ""}`}>
-        {writer === "note" && (
-          <header className="writer-header">
-            <h3>{t("memo")}</h3>
-          </header>
-        )}
-        <RichEditor
-          ref={noteEditorRef}
-          key={`${debt.id}-note-${noteRev}`}
-          debtId={debt.id}
-          html={noteForEditor}
-          placeholder={t("memo")}
-          expanded={writer === "note"}
-          onChange={queueNote}
-          onExpand={() => setWriter("note")}
-          onCollapse={() => {
-            flush();
+      <div className="detail-field">
+        <label className="detail-label">{t("memo")}</label>
+        <EditorDock
+          open={writer === "note"}
+          onClose={() => {
+            void flush();
             setWriter(null);
           }}
-          onImageInserted={() => listAttachments(debt.id).then(setAttachments)}
-        />
+          header={
+            <header className="writer-header">
+              <h3>{t("memo")}</h3>
+            </header>
+          }
+        >
+          <RichEditor
+            ref={noteEditorRef}
+            key={`${debt.id}-note-${noteRev}`}
+            debtId={debt.id}
+            html={noteForEditor}
+            placeholder={t("memo")}
+            expanded={writer === "note"}
+            onChange={queueNote}
+            onExpand={() => setWriter("note")}
+            onCollapse={() => {
+              void flush();
+              setWriter(null);
+            }}
+            onImageInserted={() => listAttachments(debt.id).then(setAttachments)}
+          />
+        </EditorDock>
       </div>
 
       {debt.status === "open" && diggingThis && (
@@ -442,37 +464,44 @@ export function DetailPanel({
         </div>
       )}
 
-      <label className="detail-label">Check</label>
-      {writer === "check" && <div className="writer-backdrop" onClick={() => { flush(); setWriter(null); }} />}
-      <div className={`editor-dock ${writer === "check" ? "open" : ""}`}>
-        {writer === "check" && (
-          <header className="writer-header">
-            <h3>Check</h3>
-            {debt.status === "open" && (
-              <button type="button" className="primary-btn" onClick={() => void tryResolve()}>
-                {t("resolve")}
-              </button>
-            )}
-          </header>
-        )}
-        <RichEditor
-          key={`${debt.id}-check`}
-          debtId={debt.id}
-          html={checkForEditor}
-          placeholder="Check"
-          expanded={writer === "check"}
-          onChange={queueCheck}
-          onExpand={() => setWriter("check")}
-          onCollapse={() => {
-            flush();
+      <div className="detail-field">
+        <label className="detail-label">Check</label>
+        <EditorDock
+          open={writer === "check"}
+          onClose={() => {
+            void flush();
             setWriter(null);
           }}
-          onImageInserted={() => listAttachments(debt.id).then(setAttachments)}
-        />
+          header={
+            <header className="writer-header">
+              <h3>Check</h3>
+              {debt.status === "open" && (
+                <button type="button" className="primary-btn" onClick={() => void tryResolve()}>
+                  {t("resolve")}
+                </button>
+              )}
+            </header>
+          }
+        >
+          <RichEditor
+            key={`${debt.id}-check`}
+            debtId={debt.id}
+            html={checkForEditor}
+            placeholder="Check"
+            expanded={writer === "check"}
+            onChange={queueCheck}
+            onExpand={() => setWriter("check")}
+            onCollapse={() => {
+              void flush();
+              setWriter(null);
+            }}
+            onImageInserted={() => listAttachments(debt.id).then(setAttachments)}
+          />
+        </EditorDock>
+        {debt.status === "open" && !checkIsReady(check) && (
+          <div className="resolve-hint">{t("checkMin", { n: CHECK_MIN_CHARS })}</div>
+        )}
       </div>
-      {debt.status === "open" && !checkIsReady(check) && (
-        <div className="resolve-hint">{t("checkMin", { n: CHECK_MIN_CHARS })}</div>
-      )}
 
       <label className="detail-label">
         <span>{t("attachments", { n: attachments.length })}</span>

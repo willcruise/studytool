@@ -378,6 +378,7 @@ export default function App() {
           onResolve={dig.resolveDig}
           onReturn={dig.closeDig}
           onKeepDigging={dig.extendDig}
+          onRestartDig={dig.restartDig}
           onDismiss={dig.resumeDig}
         />
       )}
@@ -390,6 +391,7 @@ export default function App() {
         </div>
       )}
 
+      <div id="writer-layer" className="writer-layer" />
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
