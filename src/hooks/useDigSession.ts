@@ -22,6 +22,7 @@ interface Args {
   setSelectedId: (id: number | null) => void;
   showToast: (msg: string) => void;
   t: TFn;
+  onRepaid?: (id: number, snapshot: Debt[]) => void;
   /** Flush the open detail editors so Check/Memo hit SQLite before wrap-up. */
   flushDetailRef: MutableRefObject<(() => Promise<void>) | null>;
 }
@@ -35,6 +36,7 @@ export function useDigSession({
   setSelectedId,
   showToast,
   t,
+  onRepaid,
   flushDetailRef,
 }: Args) {
   const [now, setNow] = useState(() => Date.now());
@@ -202,8 +204,10 @@ export function useDigSession({
       await db.resolveDebt(activeDig.id, checkExcerpt(check) || t("checkFallback"));
       setDigFinishRequested(false);
       setPauseDigModal(false);
+      const snapshot = allDebts;
       await refresh();
-      showToast(t("toastResolved"));
+      if (onRepaid) onRepaid(activeDig.id, snapshot);
+      else showToast(t("toastResolved"));
     } catch (err) {
       console.error(err);
       showToast(t("toastSaveFailed"));

@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
-import type { Attachment, Debt, GraphEdge, GraphMeta, Session, Stats, Tier } from "./types";
+import type { Attachment, Debt, GraphEdge, GraphMeta, GraphNodeRow, Session, Stats, Tier } from "./types";
 import { escapeHtml, toEditorHtml } from "./richtext";
 import { minutesBetween } from "./time";
 import { t } from "./i18n";
@@ -366,6 +366,15 @@ export async function addGraphNode(graphId: number, debtId: number): Promise<voi
   );
 }
 
+export async function graphsForDebt(debtId: number): Promise<number[]> {
+  const d = await getDb();
+  const rows = await d.select<{ graph_id: number }[]>(
+    "SELECT graph_id FROM graph_nodes WHERE debt_id = $1",
+    [debtId]
+  );
+  return rows.map((r) => r.graph_id);
+}
+
 export async function removeGraphNode(graphId: number, debtId: number): Promise<void> {
   const d = await getDb();
   await d.execute(
@@ -378,15 +387,22 @@ export async function removeGraphNode(graphId: number, debtId: number): Promise<
   ]);
 }
 
+export async function listAllGraphNodes(): Promise<GraphNodeRow[]> {
+  const d = await getDb();
+  return d.select<GraphNodeRow[]>("SELECT graph_id, debt_id FROM graph_nodes");
+}
+
 export async function listAllGraphEdges(): Promise<GraphEdge[]> {
   const d = await getDb();
-  return d.select<GraphEdge[]>("SELECT id, a_debt, b_debt, directed, label FROM graph_edges");
+  return d.select<GraphEdge[]>(
+    "SELECT id, graph_id, a_debt, b_debt, directed, label FROM graph_edges"
+  );
 }
 
 export async function listGraphEdges(graphId: number): Promise<GraphEdge[]> {
   const d = await getDb();
   return d.select<GraphEdge[]>(
-    "SELECT id, a_debt, b_debt, directed, label FROM graph_edges WHERE graph_id = $1",
+    "SELECT id, graph_id, a_debt, b_debt, directed, label FROM graph_edges WHERE graph_id = $1",
     [graphId]
   );
 }

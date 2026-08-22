@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
-import type { Attachment, Debt, Session } from "../types";
+import type { Attachment, Debt, GraphMeta, Session } from "../types";
 import { TIER_META } from "../types";
 import { listAttachments, removeAttachment } from "../db";
 import { basename, openAttachment } from "../files";
@@ -10,6 +10,7 @@ import { RichEditor, type RichEditorHandle } from "./RichEditor";
 import { autosizeTextarea, handleTextareaTab } from "../keys";
 import { CHECK_MIN_CHARS, checkIsReady } from "../richtext";
 import { useI18n } from "../i18n";
+import { lastGraphId } from "../graphPref";
 
 interface Props {
   debt: Debt;
@@ -34,6 +35,9 @@ interface Props {
   attachmentsVersion: number;
   onSplit: (parentId: number, title: string, note: string) => void;
   onSaveSourceFile: (id: number, path: string | null) => void;
+  graphs: GraphMeta[];
+  onMap: boolean;
+  onInvestigate: (graphId: number | null) => void | Promise<void>;
 }
 
 export function DetailPanel({
@@ -58,6 +62,9 @@ export function DetailPanel({
   attachmentsVersion,
   onSplit,
   onSaveSourceFile,
+  graphs,
+  onMap,
+  onInvestigate,
 }: Props) {
   const { t } = useI18n();
   const [note, setNote] = useState(debt.note);
@@ -71,6 +78,7 @@ export function DetailPanel({
   const [noteRev, setNoteRev] = useState(0);
   const [splitTitle, setSplitTitle] = useState("");
   const [showPaths, setShowPaths] = useState(false);
+  const [islandPick, setIslandPick] = useState(false);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const noteEditorRef = useRef<RichEditorHandle>(null);
   const noteTimer = useRef<number>(0);
@@ -285,6 +293,52 @@ export function DetailPanel({
           {t("close")}
         </button>
       </div>
+
+      {debt.status !== "evicted" && (
+        <div className="investigate-row">
+          <button
+            type="button"
+            className={`ghost-btn${onMap ? " on-map" : ""}`}
+            onClick={() => {
+              const pref = lastGraphId();
+              if ((pref != null && graphs.some((g) => g.id === pref)) || graphs.length <= 1) {
+                void onInvestigate(pref);
+                return;
+              }
+              setIslandPick(true);
+            }}
+          >
+            {onMap ? t("investigatingOn") : t("investigate")}
+          </button>
+          {graphs.length > 1 && (
+            <button
+              type="button"
+              className="ghost-btn island-pick-toggle"
+              title={t("pickIsland")}
+              onClick={() => setIslandPick((v) => !v)}
+            >
+              ▾
+            </button>
+          )}
+          {islandPick && (
+            <div className="island-pick">
+              {graphs.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  className="island-pick-item"
+                  onClick={() => {
+                    setIslandPick(false);
+                    void onInvestigate(g.id);
+                  }}
+                >
+                  {g.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {editingTitle ? (
         <textarea

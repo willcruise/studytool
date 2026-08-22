@@ -69,10 +69,16 @@ export interface GraphMeta {
 
 export interface GraphEdge {
   id: number;
+  graph_id: number;
   a_debt: number;
   b_debt: number;
   directed: number;
   label: string;
+}
+
+export interface GraphNodeRow {
+  graph_id: number;
+  debt_id: number;
 }
 
 export interface Stats {

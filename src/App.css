@@ -146,6 +146,12 @@ body {
   letter-spacing: 0.1px;
 }
 
+.stat-territory {
+  color: #86efac;
+  background: rgba(74, 222, 128, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.42);
+}
+
 .stat-explored {
   color: var(--green);
   background: rgba(74, 222, 128, 0.1);
@@ -712,6 +718,42 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.investigate-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.investigate-row .on-map {
+  color: var(--green);
+}
+
+.island-pick-toggle {
+  padding: 4px 8px;
+}
+
+.island-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.island-pick-item {
+  border: 1px solid var(--border);
+  background: var(--panel-2, rgba(255, 255, 255, 0.04));
+  color: var(--text);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.island-pick-item:hover {
+  border-color: var(--accent, #7c9cff);
 }
 
 .tier-tag {
@@ -1281,6 +1323,26 @@ body {
 
 .graph-toolbar .more-menu {
   margin-left: auto;
+}
+
+.graph-territory {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.graph-investigating {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.graph-toolbar .graph-territory + .more-menu {
+  margin-left: 0;
 }
 
 .graph-name-btn {

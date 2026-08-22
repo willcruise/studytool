@@ -1,10 +1,17 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { LOCALES, VIEW_MSG, useI18n } from "./i18n";
 import { VIEW_ORDER } from "./types";
-import type { Tier, View } from "./types";
+import type { Debt, Tier, View } from "./types";
 import * as db from "./db";
 import { checkExcerpt } from "./richtext";
 import { exportBackup, importBackup } from "./backup";
+import { lastGraphId, setLastGraphId } from "./graphPref";
+import {
+  completeTerritory,
+  groupTopologies,
+  islandContaining,
+  repayBeat,
+} from "./domain/islands";
 import { useToast } from "./hooks/useToast";
 import { useStudyData } from "./hooks/useStudyData";
 import { useBoardFilters } from "./hooks/useBoardFilters";
@@ -29,6 +36,26 @@ export default function App() {
   const flushDetailRef = useRef<(() => Promise<void>) | null>(null);
   const data = useStudyData();
   const board = useBoardFilters(data.allDebts, data.activeSession);
+  const topos = useMemo(
+    () => groupTopologies(data.graphNodes, data.graphEdges),
+    [data.graphNodes, data.graphEdges]
+  );
+  const territory = useMemo(
+    () => completeTerritory(topos, data.allDebts),
+    [topos, data.allDebts]
+  );
+  const announceRepay = (id: number, snapshot: Debt[]) => {
+    const before = islandContaining(id, topos, snapshot);
+    const afterDebts = snapshot.map((d) =>
+      d.id === id ? { ...d, status: "resolved" as const } : d
+    );
+    const after = islandContaining(id, topos, afterDebts);
+    if (repayBeat(before, after) === "completed") {
+      showToast(t("toastIslandComplete", { n: completeTerritory(topos, afterDebts).land }));
+    } else {
+      showToast(t("toastResolved"));
+    }
+  };
   const dig = useDigSession({
     openDebts: board.openDebts,
     allDebts: data.allDebts,
@@ -37,6 +64,7 @@ export default function App() {
     setSelectedId: data.setSelectedId,
     showToast,
     t,
+    onRepaid: announceRepay,
     flushDetailRef,
   });
   const { dropActive, attachmentsVersion } = useFileIngest({
@@ -105,6 +133,7 @@ export default function App() {
         />
         <div className="header-right">
           <div className="stats">
+            <span className="stat-pill stat-territory">{t("completeTerritory", { n: territory.land })}</span>
             <span className="stat-pill stat-explored">{t("statRepaid", { n: data.stats.resolved })}</span>
             <span className="stat-pill stat-unexplored">{t("statOpen", { n: data.stats.open })}</span>
           </div>
@@ -230,6 +259,7 @@ export default function App() {
             selectedId={selectedId}
             onSelectDebt={setSelectedId}
             showToast={showToast}
+            mapRevision={`${data.graphNodes.map((n) => `${n.graph_id}:${n.debt_id}`).join(",")}|${data.graphEdges.map((e) => e.id).join(",")}`}
           />
         )}
 
@@ -287,8 +317,32 @@ export default function App() {
             digActive={activeDig !== null}
             onStartDig={dig.startDig}
             attachmentsVersion={attachmentsVersion}
+            graphs={data.graphs}
+            onMap={data.graphNodes.some((n) => n.debt_id === selected.id)}
+            onInvestigate={async (graphId) => {
+              let gid = graphId ?? lastGraphId();
+              if (gid != null && !data.graphs.some((g) => g.id === gid)) gid = null;
+              if (gid == null && data.graphs.length === 1) gid = data.graphs[0].id;
+              if (gid == null && data.graphs.length === 0) {
+                const name =
+                  selected.title.replace(/\s+/g, " ").trim().slice(0, 80) || t("investigate");
+                gid = await db.createGraph(name);
+              }
+              if (gid == null) return;
+              const existing = await db.listGraphNodeIds(gid);
+              if (existing.includes(selected.id)) {
+                setLastGraphId(gid);
+                showToast(t("toastAlreadyInvestigating"));
+                return;
+              }
+              await db.addGraphNode(gid, selected.id);
+              setLastGraphId(gid);
+              await refresh();
+              showToast(t("toastIsletAdded"));
+            }}
             onSplit={async (parentId, title, note) => {
               const parent = data.allDebts.find((d) => d.id === parentId);
+              const before = islandContaining(parentId, topos, data.allDebts);
               const childId = await db.createDebt({
                 title,
                 note,
@@ -299,7 +353,8 @@ export default function App() {
                 await db.recordSplitGraph(parentId, childId, parent?.title ?? title);
               }
               await refresh();
-              showToast(t("toastSplit"));
+              if (before?.complete) showToast(t("toastIslandEnlarge"));
+              else showToast(t("toastSplit"));
             }}
             onSaveSourceFile={async (id, path) => {
               await db.updateDebt(id, { source_file: path });
@@ -334,13 +389,14 @@ export default function App() {
             flushRef={flushDetailRef}
             showToast={showToast}
             onResolve={async (id, checkHtml) => {
+              const snapshot = data.allDebts;
               try {
                 await db.updateDebt(id, { check_content: checkHtml });
                 await dig.settleDig(id);
                 await db.resolveDebt(id, checkExcerpt(checkHtml) || t("checkFallback"));
                 dig.clearDigUi();
                 await refresh();
-                showToast(t("toastResolved"));
+                announceRepay(id, snapshot);
               } catch (err) {
                 console.error(err);
                 showToast(t("toastSaveFailed"));

@@ -6,6 +6,15 @@ import * as db from "../db";
 import { ConfirmButton } from "./ConfirmButton";
 import { MoreMenu } from "./MoreMenu";
 import { useI18n } from "../i18n";
+import { lastGraphId, setLastGraphId } from "../graphPref";
+import {
+  componentOf,
+  enlargedCompleteIsland,
+  islandOf,
+  islandsOnGraph,
+  isDirectedEdge,
+  territoryOnGraph,
+} from "../domain/islands";
 
 interface GNode {
   id: string;
@@ -29,7 +38,7 @@ interface GLink {
 }
 
 function isDirected(e: { directed?: number | boolean }): boolean {
-  return Number(e.directed) === 1 || e.directed === true;
+  return isDirectedEdge(e);
 }
 
 type GraphClip = {
@@ -39,37 +48,6 @@ type GraphClip = {
 
 /** Survives graph switches so you can copy a component on one map and paste it onto another. */
 let graphClip: GraphClip | null = null;
-
-function componentOf(start: number, nodeIds: number[], edges: GraphEdge[]): GraphClip {
-  const idSet = new Set(nodeIds);
-  if (!idSet.has(start)) return { nodes: [], edges: [] };
-  const adj = new Map<number, number[]>();
-  for (const id of nodeIds) adj.set(id, []);
-  for (const e of edges) {
-    if (!idSet.has(e.a_debt) || !idSet.has(e.b_debt)) continue;
-    adj.get(e.a_debt)!.push(e.b_debt);
-    adj.get(e.b_debt)!.push(e.a_debt);
-  }
-  const seen = new Set<number>();
-  const stack = [start];
-  while (stack.length) {
-    const n = stack.pop()!;
-    if (seen.has(n)) continue;
-    seen.add(n);
-    for (const m of adj.get(n) ?? []) stack.push(m);
-  }
-  return {
-    nodes: [...seen],
-    edges: edges
-      .filter((e) => seen.has(e.a_debt) && seen.has(e.b_debt))
-      .map((e) => ({
-        a_debt: e.a_debt,
-        b_debt: e.b_debt,
-        directed: isDirected(e),
-        label: e.label ?? "",
-      })),
-  };
-}
 
 function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
@@ -88,15 +66,16 @@ interface Props {
   selectedId: number | null;
   onSelectDebt: (id: number) => void;
   showToast: (msg: string) => void;
+  mapRevision: string;
 }
 
-export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props) {
+export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevision }: Props) {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<ForceGraph<GNode, GLink> | null>(null);
 
   const [graphs, setGraphs] = useState<GraphMeta[]>([]);
-  const [currentGraphId, setCurrentGraphId] = useState<number | null>(null);
+  const [currentGraphId, setCurrentGraphId] = useState<number | null>(() => lastGraphId());
   const [nodeIds, setNodeIds] = useState<number[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -120,7 +99,11 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
   const pendingRef = useRef(pendingLink);
   const selectedEdgeRef = useRef(selectedEdge);
   const edgesRef = useRef(edges);
+  const nodeIdsRef = useRef(nodeIds);
+  const debtsRef = useRef(debts);
   const componentRef = useRef<Set<number>>(new Set());
+  const completeIslandRef = useRef<Set<number>>(new Set());
+  const fogIslandRef = useRef<Set<number>>(new Set());
   const toastRef = useRef(showToast);
   const tRef = useRef(t);
   selectedRef.current = selectedId;
@@ -129,11 +112,21 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
   pendingRef.current = pendingLink;
   selectedEdgeRef.current = selectedEdge;
   edgesRef.current = edges;
+  nodeIdsRef.current = nodeIds;
+  debtsRef.current = debts;
   toastRef.current = showToast;
   tRef.current = t;
 
   const loadGraphs = useCallback(async () => {
-    setGraphs(await db.listGraphs());
+    const list = await db.listGraphs();
+    setGraphs(list);
+    setCurrentGraphId((cur) => {
+      const pref = lastGraphId();
+      if (pref != null && list.some((g) => g.id === pref)) return pref;
+      if (cur != null && list.some((g) => g.id === cur)) return cur;
+      return null;
+    });
+    return list;
   }, []);
 
   const loadGraphContent = useCallback(async (gid: number | null) => {
@@ -151,7 +144,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
 
   useEffect(() => {
     void loadGraphs();
-  }, [loadGraphs, topologyKey]);
+  }, [loadGraphs, topologyKey, mapRevision]);
 
   useEffect(() => {
     loadGraphContent(currentGraphId);
@@ -159,12 +152,13 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
     setPendingLink(null);
     setSelectedEdge(null);
     setPickerOpen(false);
+    setLastGraphId(currentGraphId);
   }, [currentGraphId, loadGraphContent]);
 
   useEffect(() => {
     if (currentGraphId === null) return;
     void loadGraphContent(currentGraphId);
-  }, [topologyKey, currentGraphId, loadGraphContent]);
+  }, [topologyKey, mapRevision, currentGraphId, loadGraphContent]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -242,6 +236,29 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
         const isPending = node.debtId != null && node.debtId === pendingRef.current;
         const inComponent = node.debtId != null && componentRef.current.has(node.debtId);
 
+        const islandComplete = node.debtId != null && completeIslandRef.current.has(node.debtId);
+        const islandFog = node.debtId != null && fogIslandRef.current.has(node.debtId);
+
+        if (islandComplete) {
+          ctx.beginPath();
+          ctx.arc(node.x!, node.y!, r + 7, 0, 2 * Math.PI);
+          ctx.fillStyle = "rgba(74, 222, 128, 0.14)";
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(node.x!, node.y!, r + 5, 0, 2 * Math.PI);
+          ctx.strokeStyle = "rgba(74, 222, 128, 0.55)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        } else if (islandFog && !node.resolved) {
+          ctx.beginPath();
+          ctx.arc(node.x!, node.y!, r + 4, 0, 2 * Math.PI);
+          ctx.strokeStyle = "rgba(154, 166, 201, 0.4)";
+          ctx.lineWidth = 1.2;
+          ctx.setLineDash([2, 2]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
         if (isSelected || isPending) {
           ctx.beginPath();
           ctx.arc(node.x!, node.y!, r + 3, 0, 2 * Math.PI);
@@ -295,8 +312,26 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
                 toastRef.current(tRef.current("toastAlreadyLinked"));
                 return;
               }
+              const nextEdges = [
+                ...edgesRef.current,
+                {
+                  id: -1,
+                  graph_id: gid,
+                  a_debt: pending,
+                  b_debt: node.debtId!,
+                  directed: 0,
+                  label: "",
+                },
+              ];
+              const beforeA = islandOf(pending, nodeIdsRef.current, edgesRef.current, debtsRef.current);
+              const beforeB = islandOf(node.debtId!, nodeIdsRef.current, edgesRef.current, debtsRef.current);
+              const after = islandOf(pending, nodeIdsRef.current, nextEdges, debtsRef.current);
               loadGraphContent(gid);
-              toastRef.current(tRef.current("toastLinked"));
+              if (enlargedCompleteIsland(beforeA, after) || enlargedCompleteIsland(beforeB, after)) {
+                toastRef.current(tRef.current("toastIslandEnlarge"));
+              } else {
+                toastRef.current(tRef.current("toastLinked"));
+              }
             });
           } else {
             setPendingLink(null);
@@ -408,9 +443,18 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
     } else {
       componentRef.current = new Set(componentOf(selectedId, nodeIds, edges).nodes);
     }
+    const isles = islandsOnGraph(nodeIds, edges, debts);
+    const complete = new Set<number>();
+    const fog = new Set<number>();
+    for (const isle of isles) {
+      if (isle.complete) for (const id of isle.nodeIds) complete.add(id);
+      else for (const id of isle.nodeIds) fog.add(id);
+    }
+    completeIslandRef.current = complete;
+    fogIslandRef.current = fog;
     const g = graphRef.current;
     if (g) g.graphData(g.graphData());
-  }, [selectedId, nodeIds, edges]);
+  }, [selectedId, nodeIds, edges, debts]);
 
   useEffect(() => {
     if (!selectedEdge) return;
@@ -463,10 +507,26 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
       return;
     }
     const result = await db.pasteGraphComponent(currentGraphId, clip);
-    await loadGraphContent(currentGraphId);
-    showToast(
-      result.nodes === 0 && result.edges === 0 ? t("toastGraphPasteNone") : t("toastGraphPasted")
+    const completeBefore = new Set(
+      islandsOnGraph(nodeIds, edges, debts)
+        .filter((isle) => isle.complete)
+        .flatMap((isle) => isle.nodeIds)
     );
+    const hit = clip.nodes.find((id) => completeBefore.has(id));
+    await loadGraphContent(currentGraphId);
+    const [ids, es] = await Promise.all([
+      db.listGraphNodeIds(currentGraphId),
+      db.listGraphEdges(currentGraphId),
+    ]);
+    const after = hit != null ? islandOf(hit, ids, es, debts) : null;
+    const beforeIsle = hit != null ? islandOf(hit, nodeIds, edges, debts) : null;
+    if (result.nodes === 0 && result.edges === 0) {
+      showToast(t("toastGraphPasteNone"));
+    } else if (enlargedCompleteIsland(beforeIsle, after)) {
+      showToast(t("toastIslandEnlarge"));
+    } else {
+      showToast(t("toastGraphPasted"));
+    }
   }, [currentGraphId, debts, loadGraphContent, showToast, t]);
 
   useEffect(() => {
@@ -540,6 +600,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
 
   const currentGraph = graphs.find((g) => g.id === currentGraphId) ?? null;
   const nodeIdSet = new Set(nodeIds);
+  const mapTerritory = territoryOnGraph(nodeIds, edges, debts);
   const pickable = debts.filter(
     (d) =>
       d.status === "open" &&
@@ -664,6 +725,16 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
         >
           {t("graphPaste")}
         </button>
+        {currentGraph && (
+          <span className="graph-territory">
+            {t("completeTerritory", { n: mapTerritory.land })}
+            {mapTerritory.investigating > 0 && (
+              <span className="graph-investigating">
+                {t("islandInvestigating", { n: mapTerritory.investigating })}
+              </span>
+            )}
+          </span>
+        )}
         {currentGraph && (
           <MoreMenu>
             <ConfirmButton
@@ -838,6 +909,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast }: Props)
                 onClick={async () => {
                   await db.addGraphNode(currentGraph.id, d.id);
                   await loadGraphContent(currentGraph.id);
+                  showToast(t("toastIsletAdded"));
                 }}
               >
                 <span className="picker-dot" style={{ background: TIER_META[d.tier].color }} />
