@@ -9,8 +9,8 @@ import { lastGraphId, setLastGraphId } from "./graphPref";
 import {
   completeTerritory,
   groupTopologies,
-  islandContaining,
-  repayBeat,
+  islandsForDebt,
+  repayBeatAcross,
 } from "./domain/islands";
 import { useToast } from "./hooks/useToast";
 import { useStudyData } from "./hooks/useStudyData";
@@ -40,17 +40,21 @@ export default function App() {
     () => groupTopologies(data.graphNodes, data.graphEdges),
     [data.graphNodes, data.graphEdges]
   );
+  const statusSig = useMemo(
+    () => data.allDebts.map((d) => `${d.id}:${d.status}`).join(","),
+    [data.allDebts]
+  );
   const territory = useMemo(
     () => completeTerritory(topos, data.allDebts),
-    [topos, data.allDebts]
+    // statusSig stands in for allDebts: territory only depends on open/resolved/evicted
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [topos, statusSig]
   );
   const announceRepay = (id: number, snapshot: Debt[]) => {
-    const before = islandContaining(id, topos, snapshot);
     const afterDebts = snapshot.map((d) =>
       d.id === id ? { ...d, status: "resolved" as const } : d
     );
-    const after = islandContaining(id, topos, afterDebts);
-    if (repayBeat(before, after) === "completed") {
+    if (repayBeatAcross(id, topos, snapshot, afterDebts) === "completed") {
       showToast(t("toastIslandComplete", { n: completeTerritory(topos, afterDebts).land }));
     } else {
       showToast(t("toastResolved"));
@@ -256,10 +260,13 @@ export default function App() {
         {view === "graph" && (
           <GraphView
             debts={data.allDebts}
+            graphs={data.graphs}
+            graphNodes={data.graphNodes}
+            graphEdges={data.graphEdges}
             selectedId={selectedId}
             onSelectDebt={setSelectedId}
             showToast={showToast}
-            mapRevision={`${data.graphNodes.map((n) => `${n.graph_id}:${n.debt_id}`).join(",")}|${data.graphEdges.map((e) => e.id).join(",")}`}
+            onMapChange={refresh}
           />
         )}
 
@@ -342,7 +349,7 @@ export default function App() {
             }}
             onSplit={async (parentId, title, note) => {
               const parent = data.allDebts.find((d) => d.id === parentId);
-              const before = islandContaining(parentId, topos, data.allDebts);
+              const enlarged = islandsForDebt(parentId, topos, data.allDebts).some((isle) => isle.complete);
               const childId = await db.createDebt({
                 title,
                 note,
@@ -353,7 +360,7 @@ export default function App() {
                 await db.recordSplitGraph(parentId, childId, parent?.title ?? title);
               }
               await refresh();
-              if (before?.complete) showToast(t("toastIslandEnlarge"));
+              if (enlarged) showToast(t("toastIslandEnlarge"));
               else showToast(t("toastSplit"));
             }}
             onSaveSourceFile={async (id, path) => {

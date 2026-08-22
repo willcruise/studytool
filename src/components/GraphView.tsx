@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph from "force-graph";
-import type { Debt, GraphEdge, GraphMeta, Tier } from "../types";
+import type { Debt, GraphEdge, GraphMeta, GraphNodeRow, Tier } from "../types";
 import { TIER_META, TIER_ORDER } from "../types";
 import * as db from "../db";
 import { ConfirmButton } from "./ConfirmButton";
@@ -13,7 +13,9 @@ import {
   islandOf,
   islandsOnGraph,
   isDirectedEdge,
-  territoryOnGraph,
+  territoryFromIslands,
+  visibleGraphNodeIds,
+  type ComponentClip,
 } from "../domain/islands";
 
 interface GNode {
@@ -37,17 +39,10 @@ interface GLink {
   label?: string;
 }
 
-function isDirected(e: { directed?: number | boolean }): boolean {
-  return isDirectedEdge(e);
-}
-
-type GraphClip = {
-  nodes: number[];
-  edges: { a_debt: number; b_debt: number; directed: boolean; label: string }[];
-};
+const isDirected = isDirectedEdge;
 
 /** Survives graph switches so you can copy a component on one map and paste it onto another. */
-let graphClip: GraphClip | null = null;
+let graphClip: ComponentClip | null = null;
 
 function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
@@ -63,21 +58,30 @@ function shortTitle(title: string, n = 18): string {
 
 interface Props {
   debts: Debt[];
+  graphs: GraphMeta[];
+  graphNodes: GraphNodeRow[];
+  graphEdges: GraphEdge[];
   selectedId: number | null;
   onSelectDebt: (id: number) => void;
   showToast: (msg: string) => void;
-  mapRevision: string;
+  onMapChange: () => Promise<void>;
 }
 
-export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevision }: Props) {
+export function GraphView({
+  debts,
+  graphs,
+  graphNodes,
+  graphEdges,
+  selectedId,
+  onSelectDebt,
+  showToast,
+  onMapChange,
+}: Props) {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<ForceGraph<GNode, GLink> | null>(null);
 
-  const [graphs, setGraphs] = useState<GraphMeta[]>([]);
   const [currentGraphId, setCurrentGraphId] = useState<number | null>(() => lastGraphId());
-  const [nodeIds, setNodeIds] = useState<number[]>([]);
-  const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [hasClip, setHasClip] = useState(() => graphClip !== null);
   const [pickerTier, setPickerTier] = useState<Tier | "all">("all");
@@ -98,67 +102,65 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
   const linkModeRef = useRef(linkMode);
   const pendingRef = useRef(pendingLink);
   const selectedEdgeRef = useRef(selectedEdge);
-  const edgesRef = useRef(edges);
-  const nodeIdsRef = useRef(nodeIds);
+  const edgesRef = useRef<GraphEdge[]>([]);
+  const nodeIdsRef = useRef<number[]>([]);
   const debtsRef = useRef(debts);
   const componentRef = useRef<Set<number>>(new Set());
   const completeIslandRef = useRef<Set<number>>(new Set());
   const fogIslandRef = useRef<Set<number>>(new Set());
   const toastRef = useRef(showToast);
   const tRef = useRef(t);
+  const onMapChangeRef = useRef(onMapChange);
   selectedRef.current = selectedId;
   graphIdRef.current = currentGraphId;
   linkModeRef.current = linkMode;
   pendingRef.current = pendingLink;
   selectedEdgeRef.current = selectedEdge;
-  edgesRef.current = edges;
-  nodeIdsRef.current = nodeIds;
   debtsRef.current = debts;
   toastRef.current = showToast;
   tRef.current = t;
+  onMapChangeRef.current = onMapChange;
 
-  const loadGraphs = useCallback(async () => {
-    const list = await db.listGraphs();
-    setGraphs(list);
-    setCurrentGraphId((cur) => {
-      const pref = lastGraphId();
-      if (pref != null && list.some((g) => g.id === pref)) return pref;
-      if (cur != null && list.some((g) => g.id === cur)) return cur;
-      return null;
-    });
-    return list;
-  }, []);
+  const nodeIds = useMemo(
+    () =>
+      currentGraphId == null
+        ? []
+        : graphNodes.filter((n) => n.graph_id === currentGraphId).map((n) => n.debt_id),
+    [graphNodes, currentGraphId]
+  );
+  const edges = useMemo(
+    () => (currentGraphId == null ? [] : graphEdges.filter((e) => e.graph_id === currentGraphId)),
+    [graphEdges, currentGraphId]
+  );
+  const islands = useMemo(() => islandsOnGraph(nodeIds, edges, debts), [nodeIds, edges, debts]);
+  const mapTerritory = useMemo(() => territoryFromIslands(islands), [islands]);
+  edgesRef.current = edges;
+  nodeIdsRef.current = nodeIds;
 
-  const loadGraphContent = useCallback(async (gid: number | null) => {
-    if (gid === null) {
-      setNodeIds([]);
-      setEdges([]);
-    } else {
-      const [ids, es] = await Promise.all([db.listGraphNodeIds(gid), db.listGraphEdges(gid)]);
-      setNodeIds(ids);
-      setEdges(es);
-    }
-  }, []);
-
-  const topologyKey = debts.map((d) => d.id).join(",");
-
-  useEffect(() => {
-    void loadGraphs();
-  }, [loadGraphs, topologyKey, mapRevision]);
-
-  useEffect(() => {
-    loadGraphContent(currentGraphId);
+  const selectGraph = (id: number | null) => {
+    setRenaming(false);
+    setCurrentGraphId(id);
+    setLastGraphId(id);
     setLinkMode(false);
     setPendingLink(null);
     setSelectedEdge(null);
     setPickerOpen(false);
-    setLastGraphId(currentGraphId);
-  }, [currentGraphId, loadGraphContent]);
+  };
 
   useEffect(() => {
-    if (currentGraphId === null) return;
-    void loadGraphContent(currentGraphId);
-  }, [topologyKey, mapRevision, currentGraphId, loadGraphContent]);
+    if (graphs.length === 0) return;
+    const pref = lastGraphId();
+    const validPref = pref != null && graphs.some((g) => g.id === pref) ? pref : null;
+    const next =
+      validPref ??
+      (currentGraphId != null && graphs.some((g) => g.id === currentGraphId) ? currentGraphId : null);
+    if (next === currentGraphId) return;
+    setCurrentGraphId(next);
+    setLinkMode(false);
+    setPendingLink(null);
+    setSelectedEdge(null);
+    setPickerOpen(false);
+  }, [graphs, currentGraphId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -326,7 +328,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
               const beforeA = islandOf(pending, nodeIdsRef.current, edgesRef.current, debtsRef.current);
               const beforeB = islandOf(node.debtId!, nodeIdsRef.current, edgesRef.current, debtsRef.current);
               const after = islandOf(pending, nodeIdsRef.current, nextEdges, debtsRef.current);
-              loadGraphContent(gid);
+              void onMapChangeRef.current();
               if (enlargedCompleteIsland(beforeA, after) || enlargedCompleteIsland(beforeB, after)) {
                 toastRef.current(tRef.current("toastIslandEnlarge"));
               } else {
@@ -356,7 +358,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
         const gid = graphIdRef.current;
         if (gid === null || node.kind !== "debt" || node.debtId == null) return;
         db.removeGraphNode(gid, node.debtId).then(() => {
-          loadGraphContent(gid);
+          void onMapChangeRef.current();
           toastRef.current(tRef.current("toastNodeRemoved"));
         });
       });
@@ -441,12 +443,11 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
     if (selectedId == null) {
       componentRef.current = new Set();
     } else {
-      componentRef.current = new Set(componentOf(selectedId, nodeIds, edges).nodes);
+      componentRef.current = new Set(componentOf(selectedId, visibleGraphNodeIds(nodeIds, debts), edges).nodes);
     }
-    const isles = islandsOnGraph(nodeIds, edges, debts);
     const complete = new Set<number>();
     const fog = new Set<number>();
-    for (const isle of isles) {
+    for (const isle of islands) {
       if (isle.complete) for (const id of isle.nodeIds) complete.add(id);
       else for (const id of isle.nodeIds) fog.add(id);
     }
@@ -454,7 +455,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
     fogIslandRef.current = fog;
     const g = graphRef.current;
     if (g) g.graphData(g.graphData());
-  }, [selectedId, nodeIds, edges, debts]);
+  }, [selectedId, nodeIds, edges, debts, islands]);
 
   useEffect(() => {
     if (!selectedEdge) return;
@@ -473,11 +474,12 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
       showToast(t("toastNeedGraph"));
       return;
     }
-    if (selectedId == null || !nodeIds.includes(selectedId)) {
+    const visible = visibleGraphNodeIds(nodeIds, debts);
+    if (selectedId == null || !visible.includes(selectedId)) {
       showToast(t("toastGraphCopyNeedNode"));
       return;
     }
-    const clip = componentOf(selectedId, nodeIds, edges);
+    const clip = componentOf(selectedId, visible, edges);
     if (clip.nodes.length === 0) {
       showToast(t("toastGraphCopyNeedNode"));
       return;
@@ -497,8 +499,8 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
       showToast(t("toastGraphPasteEmpty"));
       return;
     }
-    const live = new Set(debts.map((d) => d.id));
-    const clip: GraphClip = {
+    const live = new Set(debts.filter((d) => d.status !== "evicted").map((d) => d.id));
+    const clip: ComponentClip = {
       nodes: graphClip.nodes.filter((id) => live.has(id)),
       edges: graphClip.edges.filter((e) => live.has(e.a_debt) && live.has(e.b_debt)),
     };
@@ -506,20 +508,29 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
       showToast(t("toastGraphPasteNone"));
       return;
     }
-    const result = await db.pasteGraphComponent(currentGraphId, clip);
     const completeBefore = new Set(
-      islandsOnGraph(nodeIds, edges, debts)
-        .filter((isle) => isle.complete)
-        .flatMap((isle) => isle.nodeIds)
+      islands.filter((isle) => isle.complete).flatMap((isle) => isle.nodeIds)
     );
     const hit = clip.nodes.find((id) => completeBefore.has(id));
-    await loadGraphContent(currentGraphId);
-    const [ids, es] = await Promise.all([
-      db.listGraphNodeIds(currentGraphId),
-      db.listGraphEdges(currentGraphId),
-    ]);
-    const after = hit != null ? islandOf(hit, ids, es, debts) : null;
     const beforeIsle = hit != null ? islandOf(hit, nodeIds, edges, debts) : null;
+    const result = await db.pasteGraphComponent(currentGraphId, clip);
+    const nextIds = [...new Set([...nodeIds, ...clip.nodes])];
+    const have = new Set(edges.map((e) => `${e.a_debt}:${e.b_debt}`));
+    const nextEdges = [
+      ...edges,
+      ...clip.edges
+        .filter((e) => !have.has(`${e.a_debt}:${e.b_debt}`) && !have.has(`${e.b_debt}:${e.a_debt}`))
+        .map((e) => ({
+          id: -1,
+          graph_id: currentGraphId,
+          a_debt: e.a_debt,
+          b_debt: e.b_debt,
+          directed: e.directed ? 1 : 0,
+          label: e.label,
+        })),
+    ];
+    const after = hit != null ? islandOf(hit, nextIds, nextEdges, debts) : null;
+    await onMapChange();
     if (result.nodes === 0 && result.edges === 0) {
       showToast(t("toastGraphPasteNone"));
     } else if (enlargedCompleteIsland(beforeIsle, after)) {
@@ -527,7 +538,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
     } else {
       showToast(t("toastGraphPasted"));
     }
-  }, [currentGraphId, debts, loadGraphContent, showToast, t]);
+  }, [currentGraphId, debts, edges, islands, nodeIds, onMapChange, showToast, t]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -562,8 +573,9 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
       const id = await db.createGraph(name);
       setNewName("");
       setCreating(false);
-      await loadGraphs();
-      setCurrentGraphId(id);
+      setLastGraphId(id);
+      await onMapChange();
+      selectGraph(id);
       setPickerOpen(true);
     } finally {
       creatingLock.current = false;
@@ -578,7 +590,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
     }
     await db.renameGraph(currentGraph.id, name);
     setRenaming(false);
-    await loadGraphs();
+    await onMapChange();
     showToast(t("toastGraphRenamed"));
   };
 
@@ -595,12 +607,11 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
       next.label ?? ""
     );
     setSelectedEdge(next);
-    await loadGraphContent(currentGraphId);
+    await onMapChange();
   };
 
   const currentGraph = graphs.find((g) => g.id === currentGraphId) ?? null;
   const nodeIdSet = new Set(nodeIds);
-  const mapTerritory = territoryOnGraph(nodeIds, edges, debts);
   const pickable = debts.filter(
     (d) =>
       d.status === "open" &&
@@ -620,8 +631,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
           className="session-select"
           value={currentGraphId ?? ""}
           onChange={(e) => {
-            setRenaming(false);
-            setCurrentGraphId(e.target.value ? Number(e.target.value) : null);
+            selectGraph(e.target.value ? Number(e.target.value) : null);
           }}
         >
           <option value="">{t("pickGraph")}</option>
@@ -743,8 +753,8 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
               className="more-menu-item"
               onConfirm={async () => {
                 await db.deleteGraph(currentGraph.id);
-                setCurrentGraphId(null);
-                await loadGraphs();
+                selectGraph(null);
+                await onMapChange();
                 showToast(t("toastGraphDeleted", { name: currentGraph.name }));
               }}
             />
@@ -835,7 +845,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
             onClick={async () => {
               await db.removeGraphEdgeById(selectedEdge.id);
               setSelectedEdge(null);
-              if (currentGraphId !== null) await loadGraphContent(currentGraphId);
+              await onMapChange();
               showToast(t("toastEdgeRemoved"));
             }}
           >
@@ -908,7 +918,7 @@ export function GraphView({ debts, selectedId, onSelectDebt, showToast, mapRevis
                 className="node-picker-item"
                 onClick={async () => {
                   await db.addGraphNode(currentGraph.id, d.id);
-                  await loadGraphContent(currentGraph.id);
+                  await onMapChange();
                   showToast(t("toastIsletAdded"));
                 }}
               >

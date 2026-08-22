@@ -366,15 +366,6 @@ export async function addGraphNode(graphId: number, debtId: number): Promise<voi
   );
 }
 
-export async function graphsForDebt(debtId: number): Promise<number[]> {
-  const d = await getDb();
-  const rows = await d.select<{ graph_id: number }[]>(
-    "SELECT graph_id FROM graph_nodes WHERE debt_id = $1",
-    [debtId]
-  );
-  return rows.map((r) => r.graph_id);
-}
-
 export async function removeGraphNode(graphId: number, debtId: number): Promise<void> {
   const d = await getDb();
   await d.execute(

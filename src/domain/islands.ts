@@ -24,25 +24,19 @@ export interface Territory {
   investigating: number;
 }
 
+export type IslandBeat = "completed" | "enlarged" | "charted" | "none";
+
 export function isDirectedEdge(e: { directed?: number | boolean }): boolean {
   return Number(e.directed) === 1 || e.directed === true;
 }
 
 export function visibleGraphNodeIds(nodeIds: number[], debts: Debt[]): number[] {
-  const live = new Set(
-    debts.filter((d) => d.status !== "evicted").map((d) => d.id)
-  );
+  const live = new Set(debts.filter((d) => d.status !== "evicted").map((d) => d.id));
   return nodeIds.filter((id) => live.has(id));
 }
 
-/** Undirected walk on manual edges only — same connectivity as copy/paste. */
-export function componentOf(
-  start: number,
-  nodeIds: number[],
-  edges: GraphEdge[]
-): ComponentClip {
+function undirectedAdj(nodeIds: number[], edges: GraphEdge[]): Map<number, number[]> {
   const idSet = new Set(nodeIds);
-  if (!idSet.has(start)) return { nodes: [], edges: [] };
   const adj = new Map<number, number[]>();
   for (const id of nodeIds) adj.set(id, []);
   for (const e of edges) {
@@ -50,6 +44,10 @@ export function componentOf(
     adj.get(e.a_debt)!.push(e.b_debt);
     adj.get(e.b_debt)!.push(e.a_debt);
   }
+  return adj;
+}
+
+function walk(start: number, adj: Map<number, number[]>): Set<number> {
   const seen = new Set<number>();
   const stack = [start];
   while (stack.length) {
@@ -58,6 +56,10 @@ export function componentOf(
     seen.add(n);
     for (const m of adj.get(n) ?? []) stack.push(m);
   }
+  return seen;
+}
+
+function clipOf(seen: Set<number>, edges: GraphEdge[]): ComponentClip {
   return {
     nodes: [...seen],
     edges: edges
@@ -71,8 +73,18 @@ export function componentOf(
   };
 }
 
-function scoreIsland(nodeIds: number[], debts: Debt[]): Island {
-  const byId = new Map(debts.map((d) => [d.id, d]));
+/** Undirected walk on manual edges only — same connectivity as copy/paste. */
+export function componentOf(
+  start: number,
+  nodeIds: number[],
+  edges: GraphEdge[]
+): ComponentClip {
+  const idSet = new Set(nodeIds);
+  if (!idSet.has(start)) return { nodes: [], edges: [] };
+  return clipOf(walk(start, undirectedAdj(nodeIds, edges)), edges);
+}
+
+function scoreIsland(nodeIds: number[], byId: Map<number, Debt>): Island {
   let open = 0;
   let resolved = 0;
   for (const id of nodeIds) {
@@ -85,7 +97,7 @@ function scoreIsland(nodeIds: number[], debts: Debt[]): Island {
     nodeIds,
     open,
     resolved,
-    complete: nodeIds.length > 0 && open === 0,
+    complete: nodeIds.length > 0 && open === 0 && resolved === nodeIds.length,
   };
 }
 
@@ -95,13 +107,15 @@ export function islandsOnGraph(
   debts: Debt[]
 ): Island[] {
   const visible = visibleGraphNodeIds(nodeIds, debts);
+  const adj = undirectedAdj(visible, edges);
+  const byId = new Map(debts.map((d) => [d.id, d]));
   const remaining = new Set(visible);
   const out: Island[] = [];
   for (const id of visible) {
     if (!remaining.has(id)) continue;
-    const nodes = componentOf(id, visible, edges).nodes;
+    const nodes = [...walk(id, adj)];
     for (const n of nodes) remaining.delete(n);
-    out.push(scoreIsland(nodes, debts));
+    out.push(scoreIsland(nodes, byId));
   }
   return out;
 }
@@ -114,15 +128,11 @@ export function islandOf(
 ): Island | null {
   const visible = visibleGraphNodeIds(nodeIds, debts);
   if (!visible.includes(start)) return null;
-  return scoreIsland(componentOf(start, visible, edges).nodes, debts);
+  const byId = new Map(debts.map((d) => [d.id, d]));
+  return scoreIsland([...walk(start, undirectedAdj(visible, edges))], byId);
 }
 
-export function territoryOnGraph(
-  nodeIds: number[],
-  edges: GraphEdge[],
-  debts: Debt[]
-): Territory {
-  const islands = islandsOnGraph(nodeIds, edges, debts);
+export function territoryFromIslands(islands: Island[]): Territory {
   let land = 0;
   let complete = 0;
   let investigating = 0;
@@ -135,6 +145,14 @@ export function territoryOnGraph(
     }
   }
   return { land, islands: complete, investigating };
+}
+
+export function territoryOnGraph(
+  nodeIds: number[],
+  edges: GraphEdge[],
+  debts: Debt[]
+): Territory {
+  return territoryFromIslands(islandsOnGraph(nodeIds, edges, debts));
 }
 
 export function groupTopologies(
@@ -168,28 +186,51 @@ export function completeTerritory(topos: GraphTopology[], debts: Debt[]): Territ
   return { land, islands, investigating };
 }
 
-export function islandContaining(
+export function islandsForDebt(
   debtId: number,
   topos: GraphTopology[],
   debts: Debt[]
-): Island | null {
+): Island[] {
+  const out: Island[] = [];
   for (const g of topos) {
     const isle = islandOf(debtId, g.nodeIds, g.edges, debts);
-    if (isle) return isle;
+    if (isle) out.push(isle);
   }
-  return null;
+  return out;
 }
 
 export type RepayBeat = "completed" | "charted";
 
-export function repayBeat(before: Island | null, after: Island | null): RepayBeat {
-  if (after?.complete && before && !before.complete) return "completed";
+/** True if any island this card sits on just flipped from investigating to complete. */
+export function repayBeatAcross(
+  debtId: number,
+  topos: GraphTopology[],
+  beforeDebts: Debt[],
+  afterDebts: Debt[]
+): RepayBeat {
+  const before = islandsForDebt(debtId, topos, beforeDebts);
+  const after = islandsForDebt(debtId, topos, afterDebts);
+  const n = Math.min(before.length, after.length);
+  for (let i = 0; i < n; i++) {
+    if (after[i].complete && !before[i].complete) return "completed";
+  }
   return "charted";
+}
+
+export function islandAfterChange(
+  before: Island | null,
+  after: Island | null,
+  mode: "repay" | "join"
+): IslandBeat {
+  if (mode === "repay") {
+    if (after?.complete && before && !before.complete) return "completed";
+    return "charted";
+  }
+  if (before?.complete && after && !after.complete) return "enlarged";
+  return "none";
 }
 
 /** True when attaching onto land that was fully charted and is investigating again. */
 export function enlargedCompleteIsland(before: Island | null, after: Island | null): boolean {
-  if (!before?.complete || !after) return false;
-  if (after.complete) return false;
-  return after.nodeIds.length > before.nodeIds.length || after.open > 0;
+  return islandAfterChange(before, after, "join") === "enlarged";
 }
